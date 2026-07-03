@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, startTransition, useActionState, useMemo } from "react";
+import { useState, useEffect, startTransition, useActionState, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -16,7 +16,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Info } from "lucide-react";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Loader2, Info, Search, ChevronsUpDown, Check, X } from "lucide-react";
 import { convertIDR } from "@/lib/utils";
 import {
   DialogClose,
@@ -35,23 +40,13 @@ const BULAN_NAMA = [
   "Juli", "Agustus", "September", "Oktober", "November", "Desember",
 ];
 
-// ─── Parse bulan & tahun dari namatagihan ─────────────────────────────────────
-// Contoh: "SPP Bulanan TK A Juli 2026 Reguler" → { bulan: 7, tahun: 2026 }
-// Contoh: "SPP Semesteran TK A Semester Ganjil 2026 Reguler" → { bulan: 7, tahun: 2026 }
-// Contoh: "Daftar Ulang KB Semester Genap 2027" → { bulan: 1, tahun: 2027 }
-// Contoh: "PPDB TK A" → { bulan: bulan sekarang, tahun: tahun sekarang }
 function parsePeriodeFromNama(namaTagihan: string): { bulan: number; tahun: number } {
   const now = new Date();
   const defaultBulan = now.getMonth() + 1;
   const defaultTahun = now.getFullYear();
-
   if (!namaTagihan) return { bulan: defaultBulan, tahun: defaultTahun };
-
-  // Cek tahun (4 digit)
   const tahunMatch = namaTagihan.match(/(\d{4})/);
   const tahun = tahunMatch ? parseInt(tahunMatch[1]) : defaultTahun;
-
-  // Cek bulan dari nama bulan
   const bulanMap: Record<string, number> = {
     Januari: 1, Februari: 2, Maret: 3, April: 4,
     Mei: 5, Juni: 6, Juli: 7, Agustus: 8,
@@ -60,29 +55,31 @@ function parsePeriodeFromNama(namaTagihan: string): { bulan: number; tahun: numb
   for (const [nama, num] of Object.entries(bulanMap)) {
     if (namaTagihan.includes(nama)) return { bulan: num, tahun };
   }
-
-  // Cek semester → ambil bulan pertama semester
   if (namaTagihan.includes("Semester Ganjil")) return { bulan: 7, tahun };
   if (namaTagihan.includes("Semester Genap")) return { bulan: 1, tahun };
-
-  // PPDB / tidak dikenali → bulan sekarang
   return { bulan: defaultBulan, tahun };
 }
 
 export default function DialogCreateTagihan({ refetch }: { refetch: () => void }) {
   const supabase = createClient();
+
+  // ─── State ────────────────────────────────────────────────────────────────
   const [selectedSiswa, setSelectedSiswa] = useState<string[]>([]);
   const [selectedMaster, setSelectedMaster] = useState<string>("");
   const [searchSiswa, setSearchSiswa] = useState("");
-
-  // bulan & tahun di-autofill, tapi bisa dioverride manual
+  const [searchMaster, setSearchMaster] = useState("");
+  const [openMasterPicker, setOpenMasterPicker] = useState(false);
   const [selectedBulan, setSelectedBulan] = useState<number>(new Date().getMonth() + 1);
   const [selectedTahun, setSelectedTahun] = useState<number>(new Date().getFullYear());
+  const searchMasterRef = useRef<HTMLInputElement>(null);
 
   const [state, action, isPending] = useActionState(createTagihanBatch, INITIAL_STATE);
 
-  // ─── Daftar master tagihan ─────────────────────────────────────────────────
-  const { data: masterList, isLoading: loadingMaster } = useQuery({
+  // ─── Master tagihan list ───────────────────────────────────────────────────
+const {
+  data: masterList = [],
+  isLoading: loadingMaster,
+} = useQuery({
     queryKey: ["master-tagihan-for-create"],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -99,23 +96,41 @@ export default function DialogCreateTagihan({ refetch }: { refetch: () => void }
     (m: any) => m.id_mastertagihan?.toString() === selectedMaster
   );
 
-  // ─── Auto-fill bulan & tahun saat master tagihan dipilih ──────────────────
+  // ─── Filter master tagihan berdasarkan search ──────────────────────────────
+  const filteredMasterList = useMemo(() => {
+    if (!searchMaster.trim()) return masterList || [];
+    const q = searchMaster.toLowerCase();
+    return (masterList || []).filter((m: any) =>
+      m.namatagihan?.toLowerCase().includes(q) ||
+      m.jenjang?.toLowerCase().includes(q) ||
+      m.jenistagihan?.toLowerCase().includes(q)
+    );
+  }, [masterList, searchMaster]);
+
+  // ─── Auto-focus search input saat popover terbuka ─────────────────────────
+  useEffect(() => {
+    if (openMasterPicker) {
+      setTimeout(() => searchMasterRef.current?.focus(), 50);
+    } else {
+      setSearchMaster("");
+    }
+  }, [openMasterPicker]);
+
+  // ─── Auto-fill bulan & tahun saat master dipilih ──────────────────────────
   useEffect(() => {
     if (masterSelected?.namatagihan) {
       const { bulan, tahun } = parsePeriodeFromNama(masterSelected.namatagihan);
       setSelectedBulan(bulan);
       setSelectedTahun(tahun);
-      // Reset pilihan siswa saat tagihan berubah
       setSelectedSiswa([]);
     }
   }, [selectedMaster]);
 
-  // ─── Daftar siswa yang BELUM punya tagihan ini (anti double billing) ───────
+  // ─── Siswa yang belum punya tagihan ini ───────────────────────────────────
   const { data: siswaList, isLoading: loadingSiswa } = useQuery({
     queryKey: ["siswa-for-tagihan", selectedMaster, selectedBulan, selectedTahun, searchSiswa],
-    enabled: !!selectedMaster, // hanya fetch setelah master dipilih
+    enabled: !!selectedMaster,
     queryFn: async () => {
-      // Ambil semua siswa aktif
       let siswaQuery = supabase
         .from("siswa")
         .select("id, namasiswa, kelas, nis")
@@ -126,7 +141,6 @@ export default function DialogCreateTagihan({ refetch }: { refetch: () => void }
       const { data: semuaSiswa, error } = await siswaQuery;
       if (error) { toast.error("Gagal memuat siswa"); return []; }
 
-      // Ambil siswa yang sudah punya tagihan ini (master + bulan + tahun yang sama)
       const { data: sudahTagihan } = await supabase
         .from("tagihan_siswa")
         .select("idsiswa")
@@ -135,13 +149,10 @@ export default function DialogCreateTagihan({ refetch }: { refetch: () => void }
         .eq("tahun", selectedTahun);
 
       const sudahSet = new Set((sudahTagihan || []).map((t: any) => t.idsiswa));
-
-      // Filter: hanya tampilkan siswa yang belum punya tagihan ini
       return (semuaSiswa || []).filter((s: any) => !sudahSet.has(s.id));
     },
   });
 
-  // ─── Group siswa per kelas ─────────────────────────────────────────────────
   const siswaByKelas = useMemo(() => {
     const groups: Record<string, any[]> = {};
     siswaList?.forEach((s: any) => {
@@ -152,6 +163,19 @@ export default function DialogCreateTagihan({ refetch }: { refetch: () => void }
     return groups;
   }, [siswaList]);
 
+  // ─── Handlers ─────────────────────────────────────────────────────────────
+  const handleSelectMaster = (id: string) => {
+    setSelectedMaster(id);
+    setSelectedSiswa([]);
+    setOpenMasterPicker(false);
+  };
+
+  const handleClearMaster = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedMaster("");
+    setSelectedSiswa([]);
+  };
+
   const handleSelectAll = (checked: boolean) => {
     setSelectedSiswa(checked ? (siswaList?.map((s: any) => s.id) || []) : []);
   };
@@ -160,15 +184,9 @@ export default function DialogCreateTagihan({ refetch }: { refetch: () => void }
     setSelectedSiswa(checked ? [...selectedSiswa, id] : selectedSiswa.filter((s) => s !== id));
   };
 
-  const handleMasterChange = (val: string) => {
-    setSelectedMaster(val);
-    setSelectedSiswa([]);
-  };
-
   const handleSubmit = () => {
     if (!selectedMaster) { toast.error("Pilih jenis tagihan terlebih dahulu"); return; }
     if (!selectedSiswa.length) { toast.error("Pilih minimal 1 siswa"); return; }
-
     const formData = new FormData();
     formData.append("siswa_ids", JSON.stringify(selectedSiswa));
     formData.append("master_tagihan_id", selectedMaster);
@@ -196,60 +214,149 @@ export default function DialogCreateTagihan({ refetch }: { refetch: () => void }
   });
 
   return (
-    <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+    <DialogContent className="sm:max-w-[680px] max-h-[90vh] overflow-y-auto">
       <DialogHeader>
         <DialogTitle>Buat Tagihan Siswa</DialogTitle>
         <DialogDescription>
-          Pilih jenis tagihan terlebih dahulu, lalu pilih siswa yang akan ditagih
+          Cari dan pilih Master tagihan, lalu pilih siswa yang akan ditagih
         </DialogDescription>
       </DialogHeader>
 
       <div className="space-y-5">
 
-        {/* ─── Step 1: Pilih Master Tagihan ─────────────────────────────────── */}
+        {/* ─── Step 1: Pilih Master Tagihan via Combobox ──────────────────── */}
         <div>
           <h3 className="text-sm font-semibold mb-2">
             <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-600 text-white text-xs mr-2">1</span>
-            Jenis Tagihan
+            Master Tagihan
           </h3>
-          {loadingMaster ? (
-            <div className="flex justify-center p-4"><Loader2 className="animate-spin" /></div>
-          ) : (
-            <div className="grid grid-cols-1 gap-2 max-h-44 overflow-y-auto border rounded-lg p-2">
-              {masterList?.map((master: any) => (
-                <div
-                  key={master.id_mastertagihan}
-                  onClick={() => handleMasterChange(master.id_mastertagihan?.toString())}
-                  className={`flex items-center justify-between p-3 border rounded-lg cursor-pointer transition-colors ${
-                    selectedMaster === master.id_mastertagihan?.toString()
-                      ? "border-green-500 bg-green-50 dark:bg-green-950"
-                      : "hover:border-gray-400"
+
+          <Popover open={openMasterPicker} onOpenChange={setOpenMasterPicker}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className={`w-full flex items-center justify-between px-3 py-2.5 border rounded-lg text-sm transition-colors
+                  ${selectedMaster
+                    ? "border-green-500 bg-green-50 dark:bg-green-950"
+                    : "border-input hover:border-gray-400 bg-background"
                   }`}
-                >
-                  <div>
-                    <p className="font-medium text-sm">{master.namatagihan}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {master.jenjang} · {master.jenistagihan}
+              >
+                {selectedMaster && masterSelected ? (
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <Check className="h-4 w-4 text-green-600 shrink-0" />
+                    <div className="text-left min-w-0">
+                      <p className="font-medium truncate">{masterSelected.namatagihan}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {masterSelected.jenjang} · {masterSelected.jenistagihan} · {convertIDR(parseFloat(masterSelected.nominal || 0))}
+                      </p>
+                    </div>
+                    {/* Tombol clear */}
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={handleClearMaster}
+                      onKeyDown={(e) => e.key === "Enter" && handleClearMaster(e as any)}
+                      className="ml-auto shrink-0 p-0.5 rounded hover:bg-red-100 text-muted-foreground hover:text-red-600 transition-colors"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground flex items-center gap-2">
+                    <Search className="h-4 w-4" />
+                    Cari atau pilih Master tagihan...
+                  </span>
+                )}
+                {!selectedMaster && (
+                  <ChevronsUpDown className="h-4 w-4 text-muted-foreground shrink-0 ml-2" />
+                )}
+              </button>
+            </PopoverTrigger>
+
+            <PopoverContent
+              className="w-[var(--radix-popover-trigger-width)] p-0"
+              align="start"
+              sideOffset={4}
+            >
+              {/* Search box di dalam popover */}
+              <div className="p-2 border-b">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    ref={searchMasterRef}
+                    placeholder="Cari nama tagihan, jenjang..."
+                    value={searchMaster}
+                    onChange={(e) => setSearchMaster(e.target.value)}
+                    className="pl-8 h-8 text-sm border-0 focus-visible:ring-0 shadow-none"
+                  />
+                </div>
+              </div>
+
+              {/* Hasil pencarian */}
+              <div className="max-h-64 overflow-y-auto">
+                {loadingMaster ? (
+                  <div className="flex justify-center py-6">
+                    <Loader2 className="animate-spin h-5 w-5 text-muted-foreground" />
+                  </div>
+                ) : filteredMasterList.length === 0 ? (
+                  <div className="py-5 px-4 text-center space-y-1.5">
+                    <p className="text-sm font-medium text-muted-foreground">
+                      {searchMaster
+                        ? `Tagihan "${searchMaster}" tidak ditemukan`
+                        : "Belum ada master tagihan"}
+                    </p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {searchMaster
+                        ? "Coba kata kunci lain, atau buat master tagihan baru di menu "
+                        : "Silakan buat master tagihan terlebih dahulu di menu "}
+                      <span className="font-semibold text-foreground">Master Tagihan</span>
+                      {searchMaster ? "." : " sebelum menerbitkan tagihan siswa."}
                     </p>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="font-semibold text-sm text-green-700 dark:text-green-400">
-                      {convertIDR(parseFloat(master.nominal || 0))}
-                    </span>
-                    <Checkbox checked={selectedMaster === master.id_mastertagihan?.toString()} />
+                ) : (
+                  <div className="p-1">
+                    {filteredMasterList.map((master: any) => {
+                      const isSelected = selectedMaster === master.id_mastertagihan?.toString();
+                      return (
+                        <div
+                          key={master.id_mastertagihan}
+                          onClick={() => handleSelectMaster(master.id_mastertagihan?.toString())}
+                          className={`flex items-center justify-between px-3 py-2.5 rounded-md cursor-pointer transition-colors ${
+                            isSelected
+                              ? "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300"
+                              : "hover:bg-muted"
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <p className="font-medium text-sm truncate">{master.namatagihan}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {master.jenjang} · {master.jenistagihan}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0 ml-3">
+                            <span className="text-sm font-semibold text-green-700 dark:text-green-400">
+                              {convertIDR(parseFloat(master.nominal || 0))}
+                            </span>
+                            {isSelected && <Check className="h-4 w-4 text-green-600" />}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
+                )}
+              </div>
+
+              {/* Footer info jumlah */}
+              {!loadingMaster && masterList?.length > 0 && (
+                <div className="px-3 py-2 border-t text-xs text-muted-foreground">
+                  {filteredMasterList.length} dari {masterList.length} jenis tagihan
                 </div>
-              ))}
-              {!masterList?.length && (
-                <p className="text-center text-sm text-muted-foreground py-4">
-                  Belum ada master tagihan. Buat dulu di menu Master Tagihan.
-                </p>
               )}
-            </div>
-          )}
+            </PopoverContent>
+          </Popover>
         </div>
 
-        {/* ─── Step 2: Periode (autofill, bisa diubah manual) ───────────────── */}
+        {/* ─── Step 2: Periode (autofill) ─────────────────────────────────── */}
         {selectedMaster && (
           <div>
             <h3 className="text-sm font-semibold mb-2">
@@ -259,9 +366,7 @@ export default function DialogCreateTagihan({ refetch }: { refetch: () => void }
             <div className="rounded-lg border border-dashed border-muted-foreground/40 p-3 bg-muted/20 space-y-3">
               <div className="flex items-start gap-2 text-xs text-muted-foreground">
                 <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                <span>
-                  Periode diisi otomatis dari nama tagihan yang dipilih. Ubah jika diperlukan.
-                </span>
+                <span>Periode diisi otomatis dari nama tagihan. Ubah jika diperlukan.</span>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
@@ -297,7 +402,7 @@ export default function DialogCreateTagihan({ refetch }: { refetch: () => void }
           </div>
         )}
 
-        {/* ─── Preview nominal ───────────────────────────────────────────────── */}
+        {/* ─── Preview nominal ────────────────────────────────────────────────
         {masterSelected && (
           <Card className="border-green-200 bg-green-50 dark:bg-green-950 dark:border-green-800">
             <CardContent className="pt-4 pb-3">
@@ -319,7 +424,7 @@ export default function DialogCreateTagihan({ refetch }: { refetch: () => void }
               )}
             </CardContent>
           </Card>
-        )}
+        )} */}
 
         {/* ─── Step 3: Pilih Siswa ──────────────────────────────────────────── */}
         {selectedMaster && (
@@ -333,18 +438,23 @@ export default function DialogCreateTagihan({ refetch }: { refetch: () => void }
                 </span>
               </h3>
               <div className="flex items-center gap-2">
-                <Input
-                  placeholder="Cari siswa..."
-                  className="w-36 h-8 text-sm"
-                  onChange={(e) => setSearchSiswa(e.target.value)}
-                />
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    placeholder="Cari siswa..."
+                    className="w-36 h-8 pl-7 text-sm"
+                    onChange={(e) => setSearchSiswa(e.target.value)}
+                  />
+                </div>
                 <Button
                   variant="outline"
                   size="sm"
                   className="h-8 text-xs"
                   onClick={() => handleSelectAll(selectedSiswa.length === 0)}
                 >
-                  {selectedSiswa.length === siswaList?.length ? "Batal Semua" : "Pilih Semua"}
+                  {selectedSiswa.length === siswaList?.length && siswaList?.length > 0
+                    ? "Batal Semua"
+                    : "Pilih Semua"}
                 </Button>
               </div>
             </div>
@@ -399,8 +509,11 @@ export default function DialogCreateTagihan({ refetch }: { refetch: () => void }
 
         {/* Placeholder sebelum tagihan dipilih */}
         {!selectedMaster && (
-          <div className="border border-dashed rounded-lg p-6 text-center text-muted-foreground text-sm">
-            Pilih jenis tagihan terlebih dahulu untuk melihat daftar siswa
+          <div className="border border-dashed rounded-lg p-8 text-center space-y-2">
+            <Search className="h-8 w-8 text-muted-foreground/50 mx-auto" />
+            <p className="text-sm text-muted-foreground">
+              Cari dan pilih jenis tagihan di atas untuk melihat daftar siswa
+            </p>
           </div>
         )}
       </div>

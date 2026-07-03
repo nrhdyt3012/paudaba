@@ -45,10 +45,8 @@ const COLOR_INACTIVE = "#fca5a5";
 // ─── Custom Tooltip ────────────────────────────────────────────────────────────
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
-
   const data = payload[0]?.payload;
   if (!data) return null;
-
   const breakdown: Record<string, number> = data.breakdown || {};
   const breakdownEntries = Object.entries(breakdown).filter(([, v]) => v > 0);
 
@@ -114,7 +112,6 @@ const MonthYearPicker = ({
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
-
       <div className="grid grid-cols-3 gap-2">
         {BULAN_SINGKAT.slice(1).map((nama, idx) => {
           const bulanIdx = idx + 1;
@@ -122,10 +119,7 @@ const MonthYearPicker = ({
           return (
             <button
               key={bulanIdx}
-              onClick={() => {
-                onChange(bulanIdx, pickerYear);
-                onClose();
-              }}
+              onClick={() => { onChange(bulanIdx, pickerYear); onClose(); }}
               className={`py-2 rounded-lg text-xs font-medium transition-all ${
                 isActive
                   ? "bg-red-600 text-white shadow-sm"
@@ -151,7 +145,6 @@ export default function RekapanTunggakan() {
   const [showTagihMassal, setShowTagihMassal] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
 
-  // Tutup picker ketika klik di luar
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
@@ -191,7 +184,7 @@ export default function RekapanTunggakan() {
     },
   });
 
-  // ─── Data grafik 6 bulan terakhir dengan breakdown ────────────────────────
+  // ─── Data grafik 6 bulan terakhir ────────────────────────────────────────
   const { data: chartData } = useQuery({
     queryKey: ["chart-tunggakan"],
     queryFn: async () => {
@@ -242,17 +235,13 @@ export default function RekapanTunggakan() {
   );
 
   const handlePrevMonth = () => {
-    if (selectedMonth === 1) {
-      setSelectedMonth(12);
-      setSelectedYear((y) => y - 1);
-    } else setSelectedMonth((m) => m - 1);
+    if (selectedMonth === 1) { setSelectedMonth(12); setSelectedYear((y) => y - 1); }
+    else setSelectedMonth((m) => m - 1);
   };
 
   const handleNextMonth = () => {
-    if (selectedMonth === 12) {
-      setSelectedMonth(1);
-      setSelectedYear((y) => y + 1);
-    } else setSelectedMonth((m) => m + 1);
+    if (selectedMonth === 12) { setSelectedMonth(1); setSelectedYear((y) => y + 1); }
+    else setSelectedMonth((m) => m + 1);
   };
 
   const handleExport = () => {
@@ -276,7 +265,6 @@ export default function RekapanTunggakan() {
     toast.success("Data berhasil diekspor");
   };
 
-  // ← refetch list tunggakan setelah kirim WA massal selesai
   const refetchTunggakan = () => {
     queryClient.invalidateQueries({ queryKey: ["rekapan-tunggakan", selectedMonth, selectedYear] });
   };
@@ -294,23 +282,10 @@ export default function RekapanTunggakan() {
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={chartData} barCategoryGap="30%">
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-              <XAxis
-                dataKey="name"
-                tick={{ fontSize: 12 }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <YAxis
-                allowDecimals={false}
-                tick={{ fontSize: 12 }}
-                axisLine={false}
-                tickLine={false}
-              />
+              <XAxis dataKey="name" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
               <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(0,0,0,0.04)" }} />
-              <Legend
-                formatter={() => "Jumlah Tunggakan"}
-                wrapperStyle={{ fontSize: 12 }}
-              />
+              <Legend formatter={() => "Jumlah Tunggakan"} wrapperStyle={{ fontSize: 12 }} />
               <Bar dataKey="total" name="Jumlah Tunggakan" radius={[6, 6, 0, 0]}>
                 {(chartData || []).map((entry, index) => (
                   <Cell
@@ -328,48 +303,31 @@ export default function RekapanTunggakan() {
         </CardContent>
       </Card>
 
-      {/* ─── Navigasi periode + tombol aksi ────────────────────────────────── */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" onClick={handlePrevMonth}>
-            <ChevronLeft className="h-4 w-4" />
+      {/* ─── Navigasi periode ───────────────────────────────────────────────── */}
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="icon" onClick={handlePrevMonth}>
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <div className="relative" ref={pickerRef}>
+          <Button
+            variant="outline"
+            className="gap-2 min-w-[160px] font-semibold"
+            onClick={() => setShowPicker((v) => !v)}
+          >
+            <Calendar className="h-4 w-4 text-red-600" />
+            {BULAN_NAMA[selectedMonth]} {selectedYear}
           </Button>
-
-          <div className="relative" ref={pickerRef}>
-            <Button
-              variant="outline"
-              className="gap-2 min-w-[160px] font-semibold"
-              onClick={() => setShowPicker((v) => !v)}
-            >
-              <Calendar className="h-4 w-4 text-red-600" />
-              {BULAN_NAMA[selectedMonth]} {selectedYear}
-            </Button>
-
-            {showPicker && (
-              <MonthYearPicker
-                selectedMonth={selectedMonth}
-                selectedYear={selectedYear}
-                onChange={(m, y) => {
-                  setSelectedMonth(m);
-                  setSelectedYear(y);
-                }}
-                onClose={() => setShowPicker(false)}
-              />
-            )}
-          </div>
-
-          <Button variant="outline" size="icon" onClick={handleNextMonth}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
+          {showPicker && (
+            <MonthYearPicker
+              selectedMonth={selectedMonth}
+              selectedYear={selectedYear}
+              onChange={(m, y) => { setSelectedMonth(m); setSelectedYear(y); }}
+              onClose={() => setShowPicker(false)}
+            />
+          )}
         </div>
-
-        <Button
-          onClick={handleExport}
-          disabled={!tunggakanData?.length}
-          variant="outline"
-        >
-          <Download className="mr-2 h-4 w-4" />
-          Export Excel
+        <Button variant="outline" size="icon" onClick={handleNextMonth}>
+          <ChevronRight className="h-4 w-4" />
         </Button>
       </div>
 
@@ -381,7 +339,6 @@ export default function RekapanTunggakan() {
           </CardHeader>
           <CardContent>
             <p className="text-3xl font-bold text-red-600">
-              {/* Hitung unik per siswa */}
               {new Set(tunggakanData?.map((item: any) => item.siswa?.id).filter(Boolean)).size} Siswa
             </p>
           </CardContent>
@@ -396,19 +353,35 @@ export default function RekapanTunggakan() {
         </Card>
       </div>
 
-      {/* ─── Tabel tunggakan ────────────────────────────────────────────────── */}
+      {/* ─── Tabel tunggakan — Export Excel masuk ke CardHeader ─────────────── */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Daftar Siswa Belum Bayar</CardTitle>
-          <Button
-            onClick={() => setShowTagihMassal(true)}
-            disabled={!tunggakanData?.length}
-            size="sm"
-            className="bg-green-600 hover:bg-green-700"
-          >
-            <MessageSquare className="mr-2 h-4 w-4" />
-            Tagih via WhatsApp
-          </Button>
+          <CardTitle>
+            Daftar Siswa Belum Bayar
+            <span className="ml-2 text-sm font-normal text-muted-foreground">
+              {BULAN_NAMA[selectedMonth]} {selectedYear}
+            </span>
+          </CardTitle>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={handleExport}
+              disabled={!tunggakanData?.length}
+              variant="outline"
+              size="sm"
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Export Excel
+            </Button>
+            <Button
+              onClick={() => setShowTagihMassal(true)}
+              disabled={!tunggakanData?.length}
+              size="sm"
+              className="bg-green-600 hover:bg-green-700"
+            >
+              <MessageSquare className="mr-2 h-4 w-4" />
+              Tagih via WhatsApp
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {isLoading ? (
