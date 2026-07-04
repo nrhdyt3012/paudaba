@@ -4,7 +4,6 @@ import DataTable from "@/components/common/data-table";
 import DropdownAction from "@/components/common/dropdown-action";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -28,11 +27,10 @@ import {
 } from "lucide-react";
 import { useMemo, useState, useEffect } from "react";
 import { toast } from "sonner";
-import DialogCreateTagihan from "./dialog-create-tagihan";
+import { useRouter } from "next/navigation";
 import DialogDeleteTagihanSiswa from "./dialog-delete-tagihan-siswa";
 import DialogBayarManual from "./dialog-bayar-manual";
 
-// ← Daftar opsi filter kelas — sesuaikan kalau ada kelas lain di data kamu
 const KELAS_OPTIONS = [
   { value: "semua", label: "Semua Kelas" },
   { value: "KB", label: "KB" },
@@ -48,12 +46,10 @@ const STATUS_OPTIONS = [
 
 function getTagihanPermissions(item: any) {
   const pembayaran: any[] = item.pembayaran ?? [];
-
   const hasMidtrans = pembayaran.some(
     (p) => p.statuspembayaran === "SUCCESS" && p.metodepembayaran !== "cash"
   );
   const hasAnySuccess = pembayaran.some((p) => p.statuspembayaran === "SUCCESS");
-
   return {
     canBayarManual: !hasMidtrans && item.statuspembayaran !== "LUNAS",
     canDelete: !hasAnySuccess,
@@ -64,16 +60,12 @@ function getTagihanPermissions(item: any) {
 export default function DaftarTagihanSiswa() {
   const supabase = createClient();
   const queryClient = useQueryClient();
+  const router = useRouter();
   const {
-    currentPage,
-    currentLimit,
-    currentSearch,
-    handleChangePage,
-    handleChangeLimit,
-    handleChangeSearch,
+    currentPage, currentLimit, currentSearch,
+    handleChangePage, handleChangeLimit, handleChangeSearch,
   } = useDataTable();
 
-  // ← State filter kelas & status
   const [filterKelas, setFilterKelas] = useState("semua");
   const [filterStatus, setFilterStatus] = useState("semua");
 
@@ -81,71 +73,44 @@ export default function DaftarTagihanSiswa() {
     queryKey: ["tagihan-admin-stats"],
     queryFn: async () => {
       const { count: total } = await supabase
-        .from("tagihan_siswa")
-        .select("*", { count: "exact", head: true });
-
+        .from("tagihan_siswa").select("*", { count: "exact", head: true });
       const { count: belumBayar } = await supabase
-        .from("tagihan_siswa")
-        .select("*", { count: "exact", head: true })
+        .from("tagihan_siswa").select("*", { count: "exact", head: true })
         .eq("statuspembayaran", "BELUM BAYAR");
-
       const { count: lunas } = await supabase
-        .from("tagihan_siswa")
-        .select("*", { count: "exact", head: true })
+        .from("tagihan_siswa").select("*", { count: "exact", head: true })
         .eq("statuspembayaran", "LUNAS");
-
-      return {
-        total: total || 0,
-        belumBayar: belumBayar || 0,
-        lunas: lunas || 0,
-      };
+      return { total: total || 0, belumBayar: belumBayar || 0, lunas: lunas || 0 };
     },
   });
 
-  const { data: tagihanList, isLoading, refetch } = useQuery({
-    // ← masukkan filter ke queryKey supaya react-query auto refetch saat filter berubah
-    queryKey: [
-      "tagihan-siswa-list",
-      currentPage,
-      currentLimit,
-      currentSearch,
-      filterKelas,
-      filterStatus,
-    ],
+  const { data: tagihanList, isLoading } = useQuery({
+    queryKey: ["tagihan-siswa-list", currentPage, currentLimit, currentSearch, filterKelas, filterStatus],
     queryFn: async () => {
       let query = supabase
         .from("tagihan_siswa")
         .select(
-          `*,
-          siswa!idsiswa(id, namasiswa, kelas),
+          `*, siswa!idsiswa(id, namasiswa, kelas),
           master_tagihan!idmastertagihan(id_mastertagihan, namatagihan, jenjang),
           pembayaran(idpembayaran, statuspembayaran, metodepembayaran)`,
           { count: "exact" }
         );
 
-      // ← Filter status pembayaran
-      if (filterStatus !== "semua") {
-        query = query.eq("statuspembayaran", filterStatus);
-      }
+      if (filterStatus !== "semua") query = query.eq("statuspembayaran", filterStatus);
+      if (filterKelas !== "semua") query = query.eq("siswa.kelas", filterKelas);
 
-      // ← Filter kelas — karena kelas ada di tabel relasi siswa, pakai filter via foreign table
-      if (filterKelas !== "semua") {
-        query = query.eq("siswa.kelas", filterKelas);
+      if (currentSearch) {
+        query = query.or(
+          `siswa.namasiswa.ilike.%${currentSearch}%,master_tagihan.namatagihan.ilike.%${currentSearch}%`
+        );
       }
 
       const { data, count, error } = await query
-        .range(
-          (currentPage - 1) * currentLimit,
-          currentPage * currentLimit - 1
-        )
+        .range((currentPage - 1) * currentLimit, currentPage * currentLimit - 1)
         .order("createdat", { ascending: false });
 
-      if (error) {
-        toast.error("Gagal memuat tagihan", { description: error.message });
-      }
+      if (error) toast.error("Gagal memuat tagihan", { description: error.message });
 
-      // ← Filter kelas via inner join Supabase kadang tidak strict-filter baris induk,
-      // jadi double-check di sisi client untuk memastikan akurat
       let result = data || [];
       if (filterKelas !== "semua") {
         result = result.filter((item: any) => item.siswa?.kelas === filterKelas);
@@ -155,73 +120,46 @@ export default function DaftarTagihanSiswa() {
     },
   });
 
-  const [selectedAction, setSelectedAction] = useState<{
-    data: any;
-    type: "bayar" | "delete";
-  } | null>(null);
-
-  const handleChangeAction = (open: boolean) => {
-    if (!open) setSelectedAction(null);
-  };
+  const [selectedAction, setSelectedAction] = useState<{ data: any; type: "bayar" | "delete" } | null>(null);
+  const handleChangeAction = (open: boolean) => { if (!open) setSelectedAction(null); };
 
   const invalidateTagihanQueries = () => {
     queryClient.invalidateQueries({ queryKey: ["tagihan-siswa-list"] });
     queryClient.invalidateQueries({ queryKey: ["tagihan-admin-stats"] });
   };
 
-  // Realtime subscription untuk auto-refresh
   useEffect(() => {
     const channel = supabase
       .channel("tagihan_siswa-changes")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "tagihan_siswa" },
-        () => {
-          invalidateTagihanQueries();
-        }
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "tagihan_siswa" }, () => {
+        invalidateTagihanQueries();
+      })
       .subscribe();
-
-    return () => {
-      channel.unsubscribe();
-    };
+    return () => { channel.unsubscribe(); };
   }, []);
 
   const filteredData = useMemo(() => {
     return (tagihanList?.data || []).map((item: any, index: number) => {
       const perms = getTagihanPermissions(item);
-
       return [
         currentLimit * (currentPage - 1) + index + 1,
-
-        <span key={`id-${item.idtagihansiswa}`} className="font-mono text-sm">
-          #{item.idtagihansiswa}
-        </span>,
-
+        <span key={`id-${item.idtagihansiswa}`} className="font-mono text-sm">#{item.idtagihansiswa}</span>,
         <div key={`siswa-${item.idtagihansiswa}`}>
           <p className="font-medium">{item.siswa?.namasiswa || "-"}</p>
-          <p className="text-xs text-muted-foreground">
-            {item.siswa?.kelas || ""}
-          </p>
+          <p className="text-xs text-muted-foreground">{item.siswa?.kelas || ""}</p>
         </div>,
-
         <div key={`tagihan-${item.idtagihansiswa}`}>
-          <p className="font-semibold">
-            {item.master_tagihan?.namatagihan || "-"}
-          </p>
+          <p className="font-semibold">{item.master_tagihan?.namatagihan || "-"}</p>
           <p className="text-xs text-muted-foreground">
             {item.bulan}/{item.tahun} · {item.master_tagihan?.jenjang || ""}
           </p>
         </div>,
-
         <span key={`nominal-${item.idtagihansiswa}`} className="font-semibold">
           {convertIDR(parseFloat(item.jumlahtagihan) || 0)}
         </span>,
-
         <span
           key={`sisa-${item.idtagihansiswa}`}
-          className={cn(
-            "font-semibold",
+          className={cn("font-semibold",
             parseFloat(item.sisa || 0) === 0
               ? "text-green-600 dark:text-green-400"
               : "text-red-600 dark:text-red-400"
@@ -229,18 +167,15 @@ export default function DaftarTagihanSiswa() {
         >
           {convertIDR(parseFloat(item.sisa) || 0)}
         </span>,
-
         <div key={`status-${item.idtagihansiswa}`} className="flex flex-col gap-1">
-          <span
-            className={cn(
-              "px-2 py-0.5 rounded-full text-xs font-medium w-fit",
-              item.statuspembayaran === "LUNAS"
-                ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100"
-                : item.statuspembayaran === "KADALUARSA"
-                ? "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
-                : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100"
-            )}
-          >
+          <span className={cn(
+            "px-2 py-0.5 rounded-full text-xs font-medium w-fit",
+            item.statuspembayaran === "LUNAS"
+              ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100"
+              : item.statuspembayaran === "KADALUARSA"
+              ? "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+              : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100"
+          )}>
             {item.statuspembayaran}
           </span>
           {!perms.canDelete && (
@@ -250,37 +185,22 @@ export default function DaftarTagihanSiswa() {
             </span>
           )}
         </div>,
-
         new Date(item.createdat).toLocaleDateString("id-ID", {
-          day: "numeric",
-          month: "short",
-          year: "numeric",
+          day: "numeric", month: "short", year: "numeric",
         }),
-
         <DropdownAction
           key={`act-${item.idtagihansiswa}`}
           menu={[
             {
               label: (
                 <span className="flex items-center gap-2">
-                  <Banknote
-                    className={cn(
-                      "w-4 h-4",
-                      perms.canBayarManual ? "text-green-600" : "text-gray-400"
-                    )}
-                  />
-                  {perms.canBayarManual
-                    ? "Bayar Manual (Cash)"
-                    : "Bayar Manual (Terkunci)"}
+                  <Banknote className={cn("w-4 h-4", perms.canBayarManual ? "text-green-600" : "text-gray-400")} />
+                  {perms.canBayarManual ? "Bayar Manual (Cash)" : "Bayar Manual (Terkunci)"}
                 </span>
               ),
               action: () => {
                 if (!perms.canBayarManual) {
-                  toast.error(
-                    perms.hasMidtrans
-                      ? "Tagihan sudah lunas via Midtrans"
-                      : "Tagihan sudah lunas"
-                  );
+                  toast.error(perms.hasMidtrans ? "Tagihan sudah lunas via Midtrans" : "Tagihan sudah lunas");
                   return;
                 }
                 setSelectedAction({ data: item, type: "bayar" });
@@ -289,21 +209,14 @@ export default function DaftarTagihanSiswa() {
             {
               label: (
                 <span className="flex items-center gap-2">
-                  <Trash2
-                    className={cn(
-                      "w-4 h-4",
-                      perms.canDelete ? "text-red-400" : "text-gray-400"
-                    )}
-                  />
+                  <Trash2 className={cn("w-4 h-4", perms.canDelete ? "text-red-400" : "text-gray-400")} />
                   {perms.canDelete ? "Hapus" : "Hapus (Terkunci)"}
                 </span>
               ),
               variant: perms.canDelete ? "destructive" : "default",
               action: () => {
                 if (!perms.canDelete) {
-                  toast.error(
-                    "Tidak dapat menghapus tagihan yang sudah memiliki riwayat pembayaran"
-                  );
+                  toast.error("Tidak dapat menghapus tagihan yang sudah memiliki riwayat pembayaran");
                   return;
                 }
                 setSelectedAction({ data: item, type: "delete" });
@@ -320,54 +233,39 @@ export default function DaftarTagihanSiswa() {
       <div className="flex flex-col lg:flex-row mb-4 gap-2 justify-between w-full">
         <div>
           <h1 className="text-2xl font-bold">Tagihan Siswa</h1>
-          <p className="text-sm text-muted-foreground">
-            Kelola tagihan pembayaran siswa
-          </p>
+          <p className="text-sm text-muted-foreground">Kelola tagihan pembayaran siswa</p>
         </div>
         <div className="flex flex-col sm:flex-row gap-2">
           <Input
-            placeholder="Cari siswa atau periode..."
+            placeholder="Cari siswa atau tagihan..."
             onChange={(e) => handleChangeSearch(e.target.value)}
             className="max-w-sm"
           />
-
-          {/* ← FILTER KELAS */}
           <Select value={filterKelas} onValueChange={setFilterKelas}>
-            <SelectTrigger className="w-[140px]">
-              <SelectValue placeholder="Kelas" />
-            </SelectTrigger>
+            <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
             <SelectContent>
               {KELAS_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
-
-          {/* ← FILTER STATUS */}
           <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-[150px]">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
+            <SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger>
             <SelectContent>
               {STATUS_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
 
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button className="bg-green-600 hover:bg-green-700">
-                <Plus className="w-4 h-4 mr-2" />
-                Buat Tagihan
-              </Button>
-            </DialogTrigger>
-            <DialogCreateTagihan refetch={invalidateTagihanQueries} />
-          </Dialog>
+          {/* ← Navigate ke halaman penuh, bukan buka dialog */}
+          <Button
+            className="bg-green-600 hover:bg-green-700"
+            onClick={() => router.push("/admin/tagihan/buat")}
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Buat Tagihan
+          </Button>
         </div>
       </div>
 
@@ -381,51 +279,31 @@ export default function DaftarTagihanSiswa() {
             <div className="text-2xl font-bold">{stats?.total || 0}</div>
           </CardContent>
         </Card>
-
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm">Belum Bayar</CardTitle>
             <AlertCircle className="h-4 w-4 text-red-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">
-              {stats?.belumBayar || 0}
-            </div>
+            <div className="text-2xl font-bold text-red-600">{stats?.belumBayar || 0}</div>
           </CardContent>
         </Card>
-
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm">Lunas</CardTitle>
             <CheckCircle2 className="h-4 w-4 text-green-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">
-              {stats?.lunas || 0}
-            </div>
+            <div className="text-2xl font-bold text-green-600">{stats?.lunas || 0}</div>
           </CardContent>
         </Card>
       </div>
 
       <DataTable
-        header={[
-          "No",
-          "ID",
-          "Nama Siswa",
-          "Tagihan",
-          "Nominal",
-          "Sisa Tagihan",
-          "Status",
-          "Tanggal",
-          "Aksi",
-        ]}
+        header={["No", "ID", "Nama Siswa", "Tagihan", "Nominal", "Sisa Tagihan", "Status", "Tanggal", "Aksi"]}
         data={filteredData}
         isLoading={isLoading}
-        totalPages={
-          tagihanList?.count
-            ? Math.ceil(tagihanList.count / currentLimit)
-            : 0
-        }
+        totalPages={tagihanList?.count ? Math.ceil(tagihanList.count / currentLimit) : 0}
         currentPage={currentPage}
         currentLimit={currentLimit}
         onChangePage={handleChangePage}
@@ -438,7 +316,6 @@ export default function DaftarTagihanSiswa() {
         currentData={selectedAction?.data}
         handleChangeAction={handleChangeAction}
       />
-
       <DialogDeleteTagihanSiswa
         open={selectedAction?.type === "delete"}
         refetch={invalidateTagihanQueries}

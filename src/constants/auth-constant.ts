@@ -13,6 +13,7 @@ export const INITIAL_CREATE_USER_FORM = {
   email_wali: "",
   tempat_lahir: "",
   tanggal_lahir: "",
+  tipe_spp: "reguler" as "reguler" | "subsidi",
   role: "siswa",
 };
 
@@ -26,7 +27,6 @@ export const INITIAL_STATE_UPDATE_USER = {
   errors: { _form: [] as string[] },
 };
 
-// ← FIX: ini yang diminta auth-store.ts tapi belum ada
 export const INITIAL_STATE_PROFILE = {
   id: undefined,
   name: undefined,
@@ -34,17 +34,21 @@ export const INITIAL_STATE_PROFILE = {
   role: undefined,
 };
 
-// Daftar kelas PAUD
 export const KELAS_LIST = [
   { value: "KB", label: "KB (Kelompok Bermain)" },
   { value: "TK A", label: "TK A" },
   { value: "TK B", label: "TK B" },
 ];
 
-// Daftar jenis kelamin
 export const JENIS_KELAMIN_LIST = [
   { value: "Laki-laki", label: "Laki-laki" },
   { value: "Perempuan", label: "Perempuan" },
+];
+
+// Tipe SPP — hanya untuk keperluan administrasi, tidak ditampilkan ke wali siswa
+export const TIPE_SPP_SISWA_LIST = [
+  { value: "reguler", label: "Reguler" },
+  { value: "subsidi", label: "Subsidi" },
 ];
 
 export const INITIAL_LOGIN_FORM = {

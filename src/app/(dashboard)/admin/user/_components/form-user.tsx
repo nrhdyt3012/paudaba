@@ -10,7 +10,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Form } from "@/components/ui/form";
-import { KELAS_LIST, JENIS_KELAMIN_LIST } from "@/constants/auth-constant";
+import {
+  KELAS_LIST,
+  JENIS_KELAMIN_LIST,
+  TIPE_SPP_SISWA_LIST,
+} from "@/constants/auth-constant";
 import { Loader2 } from "lucide-react";
 import { FormEvent } from "react";
 import { FieldValues, Path, UseFormReturn } from "react-hook-form";
@@ -92,6 +96,13 @@ export default function FormUser<T extends FieldValues>({
                 placeholder="Contoh: 2024"
               />
             </div>
+
+              <FormSelect
+                form={form}
+                name={"tipe_spp" as Path<T>}
+                label="Tipe SPP"
+                selectItem={TIPE_SPP_SISWA_LIST}
+              />
 
             <FormInput
               form={form}

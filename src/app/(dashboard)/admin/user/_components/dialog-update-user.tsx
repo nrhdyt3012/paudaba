@@ -1,3 +1,5 @@
+"use client";
+
 import { INITIAL_STATE_UPDATE_USER } from "@/constants/auth-constant";
 import { UpdateUserForm, updateUserSchema } from "@/validations/auth-validation";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -6,7 +8,6 @@ import { useForm } from "react-hook-form";
 import { updateUser } from "../actions";
 import { toast } from "sonner";
 import FormUser from "./form-user";
-import { Profile } from "@/types/auth";
 import { Dialog } from "@radix-ui/react-dialog";
 
 export default function DialogUpdateUser({
@@ -16,7 +17,7 @@ export default function DialogUpdateUser({
   handleChangeAction,
 }: {
   refetch: () => void;
-  currentData?: any; // pakai any dulu untuk debug
+  currentData?: any;
   open?: boolean;
   handleChangeAction?: (open: boolean) => void;
 }) {
@@ -30,22 +31,17 @@ export default function DialogUpdateUser({
   );
 
   const onSubmit = form.handleSubmit((data) => {
-    console.log("=== FORM DATA DIKIRIM ===", data);
     const formData = new FormData();
     Object.entries(data).forEach(([key, value]) => {
       if (key === "avatar_url") return;
       formData.append(key, (value as string) || "");
     });
     formData.append("id", currentData?.id ?? "");
-    console.log("=== ID SISWA ===", currentData?.id);
-    startTransition(() => {
-      action(formData);
-    });
+    startTransition(() => { action(formData); });
   });
 
   useEffect(() => {
     if (state?.status === "error") {
-      console.error("=== ERROR STATE ===", state.errors);
       toast.error("Gagal Mengubah Data", {
         description: state.errors?._form?.[0],
       });
@@ -60,23 +56,11 @@ export default function DialogUpdateUser({
 
   useEffect(() => {
     if (currentData && open) {
-      // DEBUG: lihat semua key yang ada di currentData
-      console.log("=== CURRENT DATA LENGKAP ===", JSON.stringify(currentData, null, 2));
-      console.log("=== KEYS ===", Object.keys(currentData));
-
       form.setValue("nama_siswa", currentData.namaSiswa || currentData.namasiswa || currentData.name || "");
       form.setValue("NIS", currentData.NIS || currentData.nis || "");
 
-      // Ambil jenis kelamin dari semua kemungkinan field
-      const rawJK =
-        currentData.jeniskelamin ??
-        currentData.jenis_kelamin ??
-        currentData.jenisKelamin ??
-        "";
-
-      console.log("=== RAW JENIS KELAMIN ===", rawJK);
-
-      // Normalisasi ke "Laki-laki" atau "Perempuan"
+      // Normalisasi jenis kelamin
+      const rawJK = currentData.jeniskelamin ?? currentData.jenis_kelamin ?? currentData.jenisKelamin ?? "";
       let normalizedJK: "Laki-laki" | "Perempuan" | undefined;
       const jkLower = String(rawJK).toLowerCase().trim();
       if (jkLower === "laki-laki" || jkLower === "l" || jkLower === "laki") {
@@ -84,12 +68,7 @@ export default function DialogUpdateUser({
       } else if (jkLower === "perempuan" || jkLower === "p") {
         normalizedJK = "Perempuan";
       }
-
-      console.log("=== NORMALIZED JK ===", normalizedJK);
-
-      if (normalizedJK) {
-        form.setValue("jenis_kelamin", normalizedJK);
-      }
+      if (normalizedJK) form.setValue("jenis_kelamin", normalizedJK);
 
       form.setValue("kelas", currentData.kelas || "");
       form.setValue("angkatan", currentData.angkatan || "");
@@ -99,10 +78,11 @@ export default function DialogUpdateUser({
       form.setValue("tanggal_lahir", currentData.tanggalLahir || currentData.tanggallahir || "");
       form.setValue("role", "siswa");
 
-      // DEBUG: lihat nilai form setelah di-set
-      setTimeout(() => {
-        console.log("=== FORM VALUES SETELAH SET ===", form.getValues());
-      }, 100);
+      // ← Tipe SPP — pre-fill dari data siswa
+      form.setValue(
+        "tipe_spp",
+        (currentData.tipe_spp as "reguler" | "subsidi") || "reguler"
+      );
     }
   }, [currentData, open]);
 

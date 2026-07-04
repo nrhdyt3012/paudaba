@@ -21,6 +21,7 @@ export async function createUser(prevState: AuthFormState, formData: FormData) {
     email_wali: formData.get("email_wali") || undefined,
     tempat_lahir: formData.get("tempat_lahir"),
     tanggal_lahir: formData.get("tanggal_lahir"),
+    tipe_spp: formData.get("tipe_spp") || "reguler",
     role: formData.get("role") || "siswa",
   });
 
@@ -68,6 +69,7 @@ export async function createUser(prevState: AuthFormState, formData: FormData) {
       nowa: validatedFields.data.no_wa,
       tempatlahir: validatedFields.data.tempat_lahir || null,
       tanggallahir: validatedFields.data.tanggal_lahir || null,
+      tipe_spp: validatedFields.data.tipe_spp || "reguler",
       status: "aktif",
     });
 
@@ -78,7 +80,7 @@ export async function createUser(prevState: AuthFormState, formData: FormData) {
         supabase,
         namamenu: "Data Siswa",
         jenisaksi: "TAMBAH",
-        deskripsi: `Menambahkan data siswa: ${validatedFields.data.nama_siswa} (${validatedFields.data.kelas})`,
+        deskripsi: `Menambahkan data siswa: ${validatedFields.data.nama_siswa} (${validatedFields.data.kelas} - SPP ${validatedFields.data.tipe_spp})`,
       });
     }
   }
@@ -113,13 +115,13 @@ export async function updateUser(prevState: AuthFormState, formData: FormData) {
     email_wali: formData.get("email_wali") || undefined,
     tempat_lahir: formData.get("tempat_lahir"),
     tanggal_lahir: formData.get("tanggal_lahir"),
+    tipe_spp: formData.get("tipe_spp") || "reguler",
     role: formData.get("role") || "siswa",
   });
 
   if (!validatedFields.success) {
     const fieldErrors = validatedFields.error.flatten().fieldErrors;
     console.error("[updateUser] Validation error:", fieldErrors);
-    // Kirim pesan error yang informatif
     const errorMessages = Object.entries(fieldErrors)
       .map(([field, msgs]) => `${field}: ${(msgs as string[]).join(", ")}`)
       .join(" | ");
@@ -154,6 +156,7 @@ export async function updateUser(prevState: AuthFormState, formData: FormData) {
       nowa: validatedFields.data.no_wa,
       tempatlahir: validatedFields.data.tempat_lahir || null,
       tanggallahir: validatedFields.data.tanggal_lahir || null,
+      tipe_spp: validatedFields.data.tipe_spp || "reguler",
       updatedat: new Date().toISOString(),
     })
     .eq("id", userId);
@@ -173,7 +176,7 @@ export async function updateUser(prevState: AuthFormState, formData: FormData) {
     supabase,
     namamenu: "Data Siswa",
     jenisaksi: "UBAH",
-    deskripsi: `Mengubah data siswa: ${validatedFields.data.nama_siswa}`,
+    deskripsi: `Mengubah data siswa: ${validatedFields.data.nama_siswa} (SPP ${validatedFields.data.tipe_spp})`,
   });
 
   revalidatePath("/admin/user");

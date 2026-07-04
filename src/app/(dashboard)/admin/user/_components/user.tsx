@@ -102,6 +102,18 @@ export default function UserManagement() {
       // Angkatan
       item.angkatan || "-",
 
+      // Tipe SPP ← kolom baru
+      <span
+        key={`tipe-${item.id}`}
+        className={`px-2 py-1 rounded-full text-xs font-medium capitalize ${
+          item.tipe_spp === "subsidi"
+            ? "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100"
+            : "bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-100"
+        }`}
+      >
+        {item.tipe_spp || "reguler"}
+      </span>,
+
       // Status
       <span
         key={`status-${item.id}`}
@@ -139,9 +151,10 @@ export default function UserManagement() {
                   tempatLahir: item.tempatlahir,
                   tanggalLahir: item.tanggallahir,
                   jeniskelamin: item.jeniskelamin,
+                  tipe_spp: item.tipe_spp || "reguler",
                   status: item.status,
                   role: "siswa",
-                } as Profile & { jeniskelamin?: string },
+                } as Profile & { jeniskelamin?: string; tipe_spp?: string },
                 type: "update",
               }),
           },
