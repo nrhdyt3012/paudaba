@@ -233,7 +233,7 @@ export default function BuatTagihanPage() {
   }, [state]);
 
   return (
-    <div className="w-full space-y-6 pb-24">
+    <div className="w-full space-y-6">
 
       {/* ─── Header ──────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-3">
@@ -251,8 +251,8 @@ export default function BuatTagihanPage() {
       {/* ════════════════════════════════════════════════════════════════════
           STEP 1 — Master Tagihan (combobox search)
       ════════════════════════════════════════════════════════════════════ */}
-      <Card>
-        <CardHeader className="pb-3">
+      <Card className="gap-3">
+        <CardHeader className="pb-1">
           <CardTitle className="text-base flex items-center gap-2">
             <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-600 text-white text-xs shrink-0">1</span>
             Master Tagihan
@@ -375,7 +375,7 @@ export default function BuatTagihanPage() {
           STEP 2 — Periode (muncul setelah master dipilih)
       ════════════════════════════════════════════════════════════════════ */}
       {selectedMaster && (
-        <Card>
+        <Card className="3">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-600 text-white text-xs shrink-0">2</span>
@@ -383,10 +383,6 @@ export default function BuatTagihanPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/40 rounded-lg p-2.5">
-              <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-              <span>Periode diisi otomatis dari nama tagihan. Ubah jika diperlukan.</span>
-            </div>
             <div className="grid grid-cols-2 gap-3 max-w-sm">
               <div className="space-y-1.5">
                 <Label className="text-xs">Bulan</Label>
@@ -417,30 +413,22 @@ export default function BuatTagihanPage() {
 
       {/* ════════════════════════════════════════════════════════════════════
           STEP 3 — Pilih Siswa (muncul setelah master dipilih)
+          Filter kelas, tipe SPP, pencarian nama, dan tombol pilih semua
+          kini berada sejajar dalam satu baris.
       ════════════════════════════════════════════════════════════════════ */}
       {selectedMaster && (
         <Card>
           <CardHeader className="pb-3">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-600 text-white text-xs shrink-0">3</span>
-                Pilih Siswa
-                {selectedSiswa.length > 0 && (
-                  <Badge className="bg-green-600 text-white text-xs">{selectedSiswa.length} dipilih</Badge>
-                )}
-              </CardTitle>
-              <Button
-                variant="outline" size="sm" className="h-8 text-xs"
-                onClick={handleSelectAll} disabled={!siswaList?.length}
-              >
-                <Users className="h-3.5 w-3.5 mr-1.5" />
-                {selectedSiswa.length === siswaList?.length && siswaList?.length > 0
-                  ? "Batal Semua" : "Pilih Semua"}
-              </Button>
-            </div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-600 text-white text-xs shrink-0">3</span>
+              Pilih Siswa
+              {selectedSiswa.length > 0 && (
+                <Badge className="bg-green-600 text-white text-xs">{selectedSiswa.length} dipilih</Badge>
+              )}
+            </CardTitle>
 
-            {/* Filter row */}
-            <div className="flex flex-wrap gap-2 mt-3">
+            {/* Filter row: kelas, tipe SPP, pencarian nama, tombol pilih semua — sejajar */}
+            <div className="flex flex-wrap items-center gap-2 mt-3">
               <Select value={filterKelas} onValueChange={setFilterKelas}>
                 <SelectTrigger className="w-[140px] h-9 text-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -468,19 +456,16 @@ export default function BuatTagihanPage() {
                   onChange={(e) => setSearchSiswa(e.target.value)}
                 />
               </div>
-            </div>
 
-            {/* Info auto-filter */}
-            {autoTipeSPP && (
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-2">
-                <Info className="h-3 w-3 shrink-0" />
-                <span>
-                  Filter tipe SPP diatur otomatis ke{" "}
-                  <span className="font-semibold capitalize text-foreground">{autoTipeSPP}</span>
-                  {" "}sesuai tagihan yang dipilih. Bisa diubah manual.
-                </span>
-              </div>
-            )}
+              <Button
+                variant="outline" size="sm" className="h-9 text-xs shrink-0"
+                onClick={handleSelectAll} disabled={!siswaList?.length}
+              >
+                <Users className="h-3.5 w-3.5 mr-1.5" />
+                {selectedSiswa.length === siswaList?.length && siswaList?.length > 0
+                  ? "Batal Semua" : "Pilih Semua"}
+              </Button>
+            </div>
           </CardHeader>
 
           <CardContent>
@@ -578,35 +563,37 @@ export default function BuatTagihanPage() {
         </div>
       )}
 
-      {/* ─── Footer sticky ────────────────────────────────────────────────── */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 border-t bg-background/95 backdrop-blur-sm px-6 py-3 shadow-lg">
-        <div className="max-w-screen-2xl mx-auto flex items-center justify-between gap-4">
+      {/* ─── Footer aksi ─────────────────────────────────────────────────────
+          Tidak lagi "fixed" di viewport (sehingga tidak menyisakan area
+          kosong di bawah kartu Pilih Siswa) dan tombol Batal kini
+          ditempatkan tepat di sebelah kiri tombol Buat Tagihan.
+      ────────────────────────────────────────────────────────────────────── */}
+      <div className="border-t bg-background/95 backdrop-blur-sm px-4 py-3 rounded-lg">
+        <div className="flex items-center justify-end gap-4 flex-wrap">
+          {selectedSiswa.length > 0 && masterSelected && (
+            <div className="text-sm mr-auto text-right">
+              <span className="text-muted-foreground">{selectedSiswa.length} siswa · </span>
+              <span className="font-bold text-green-700 dark:text-green-400">
+                {convertIDR(parseFloat(masterSelected.nominal || 0) * selectedSiswa.length)}
+              </span>
+            </div>
+          )}
           <Button variant="outline" onClick={() => router.push("/admin/tagihan")}>
             <X className="h-4 w-4 mr-2" />
             Batal
           </Button>
-          <div className="flex items-center gap-4">
-            {selectedSiswa.length > 0 && masterSelected && (
-              <div className="text-sm hidden sm:block text-right">
-                <span className="text-muted-foreground">{selectedSiswa.length} siswa · </span>
-                <span className="font-bold text-green-700 dark:text-green-400">
-                  {convertIDR(parseFloat(masterSelected.nominal || 0) * selectedSiswa.length)}
-                </span>
-              </div>
-            )}
-            <Button
-              onClick={handleSubmit}
-              disabled={isPending || selectedSiswa.length === 0 || !selectedMaster}
-              className="bg-green-600 hover:bg-green-700 min-w-[200px]"
-            >
-              {isPending
-                ? <><Loader2 className="animate-spin mr-2 h-4 w-4" />Membuat Tagihan...</>
-                : selectedSiswa.length > 0
-                  ? `Buat Tagihan (${selectedSiswa.length} Siswa)`
-                  : "Pilih Siswa Terlebih Dahulu"
-              }
-            </Button>
-          </div>
+          <Button
+            onClick={handleSubmit}
+            disabled={isPending || selectedSiswa.length === 0 || !selectedMaster}
+            className="bg-green-600 hover:bg-green-700 min-w-[200px]"
+          >
+            {isPending
+              ? <><Loader2 className="animate-spin mr-2 h-4 w-4" />Membuat Tagihan...</>
+              : selectedSiswa.length > 0
+                ? `Buat Tagihan (${selectedSiswa.length} Siswa)`
+                : "Pilih Siswa Terlebih Dahulu"
+            }
+          </Button>
         </div>
       </div>
     </div>

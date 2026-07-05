@@ -164,7 +164,7 @@ export default function ProfilPage() {
                   <h3 className="text-2xl font-bold">Visi</h3>
                 </div>
                 <p className="text-lg text-gray-700 dark:text-gray-300 leading-relaxed">
-                  Menjadi lembaga PAUD unggulan yang menghasilkan generasi sholih, 
+                  Menjadi lembaga KB/TK unggulan yang menghasilkan generasi sholih, 
                   ceria, dan mandiri dengan metode pembelajaran ramah otak anak
                 </p>
               </CardContent>
