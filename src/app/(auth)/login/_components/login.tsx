@@ -1,7 +1,5 @@
 "use client";
 
-// src/app/(auth)/login/_components/login.tsx
-
 import Image from "next/image";
 import FormInput from "@/components/common/form-input";
 import { Button } from "@/components/ui/button";

@@ -36,9 +36,20 @@ export async function login(
       data: { user },
     } = await supabase.auth.signInWithPassword(validatedFields.data);
 
-    if (error) {
-      return { status: "error", errors: { _form: [error.message] } };
-    }
+if (error) {
+  let message = error.message;
+
+  if (error.message === "Invalid login credentials") {
+    message = "Email atau password yang Anda masukkan salah.";
+  }
+
+  return {
+    status: "error",
+    errors: {
+      _form: [message],
+    },
+  };
+}
     if (!user) {
       return { status: "error", errors: { _form: ["User tidak ditemukan"] } };
     }
