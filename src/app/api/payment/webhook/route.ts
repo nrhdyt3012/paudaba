@@ -65,10 +65,6 @@ export async function POST(request: NextRequest) {
 
     // ════════════════════════════════════════════════════════════════════
     // FIX DUPLIKASI #1 — Idempotency check di awal.
-    // Cek dulu apakah order_id ini SUDAH PERNAH diproses sebelumnya
-    // (tercatat di payment_gateway_log). Kalau sudah, webhook ini adalah
-    // retry/duplicate dari Midtrans (mereka memang suka retry beberapa kali)
-    // dan kita harus berhenti di sini, JANGAN proses ulang.
     // ════════════════════════════════════════════════════════════════════
     const { data: existingLog } = await supabase
       .from("payment_gateway_log")
@@ -100,8 +96,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Idempotent: sudah LUNAS → skip (jaga-jaga kalau log belum tercatat
-    // tapi tagihan sudah terupdate lewat jalur lain)
+    // Idempotent: sudah LUNAS → skip
     if (tagihan.statuspembayaran === "LUNAS") {
       console.log("ℹ️ [WEBHOOK] Tagihan sudah LUNAS, skip");
       return NextResponse.json({ status: "already_paid" });
@@ -109,27 +104,42 @@ export async function POST(request: NextRequest) {
 
     const metodepembayaran = body.payment_type || "midtrans_online";
     const jumlahTagihan = parseFloat(tagihan.jumlahtagihan || "0");
+    const sudahBayarSebelumnya = parseFloat(tagihan.jumlahterbayar || "0");
     const nominalBayar = parseFloat(gross_amount || "0");
 
     // ─── Map status Midtrans → status internal ──────────────────────────
-    let statuspembayaranTagihan: "BELUM BAYAR" | "LUNAS" | "KADALUARSA" =
-      "BELUM BAYAR";
+    // PENTING: "KADALUARSA" TIDAK LAGI menjadi status tagihan. Kalau token
+    // Midtrans expire, itu murni status transaksi/link pembayaran — tagihan
+    // tetap "BELUM BAYAR" (atau "BELUM LUNAS" kalau sudah pernah dicicil),
+    // supaya tetap muncul di Rekapan Tunggakan & bisa di-generate link baru.
+    let statuspembayaranTagihan: "BELUM BAYAR" | "BELUM LUNAS" | "LUNAS" =
+      sudahBayarSebelumnya > 0 ? "BELUM LUNAS" : "BELUM BAYAR";
     let statusPembayaranRecord: "SUCCESS" | "FAILED" | "EXPIRED" | "PENDING" =
       "PENDING";
+    let terbayarBaruUntukLog = sudahBayarSebelumnya;
 
     if (transaction_status === "settlement" || transaction_status === "capture") {
-      statuspembayaranTagihan = "LUNAS";
+      // Midtrans di alur ini selalu bayar penuh sisa tagihan (bukan cicilan
+      // parsial — cicilan parsial hanya lewat jalur cash/bayarTagihanManual).
+      terbayarBaruUntukLog = sudahBayarSebelumnya + nominalBayar;
+      statuspembayaranTagihan =
+        terbayarBaruUntukLog >= jumlahTagihan ? "LUNAS" : "BELUM LUNAS";
       statusPembayaranRecord = "SUCCESS";
-      console.log(`✅ [WEBHOOK] SUKSES: nominal=${nominalBayar}, status=LUNAS`);
+      console.log(
+        `✅ [WEBHOOK] SUKSES: nominal=${nominalBayar}, status=${statuspembayaranTagihan}`
+      );
     } else if (transaction_status === "expire") {
-      statuspembayaranTagihan = "KADALUARSA";
+      // Tidak mengubah status tagihan — cukup catat di log transaksi (di bawah)
+      // dan reset paymenttoken supaya wali bisa generate link baru.
       statusPembayaranRecord = "EXPIRED";
-      console.log("⏰ [WEBHOOK] Token EXPIRED");
+      console.log(
+        "⏰ [WEBHOOK] Token EXPIRED — status tagihan TIDAK diubah, tetap:",
+        statuspembayaranTagihan
+      );
     } else if (transaction_status === "cancel" || transaction_status === "deny") {
-      statuspembayaranTagihan = "BELUM BAYAR";
       statusPembayaranRecord = "FAILED";
       console.log(
-        `🚫 [WEBHOOK] ${transaction_status.toUpperCase()}: tagihan kembali ke BELUM BAYAR`
+        `🚫 [WEBHOOK] ${transaction_status.toUpperCase()}: status tagihan tetap ${statuspembayaranTagihan}`
       );
     } else {
       console.log("⏳ [WEBHOOK] Status pending/lainnya:", transaction_status);
@@ -138,10 +148,7 @@ export async function POST(request: NextRequest) {
     // ────────────────────────────────────────────────────────────────────
 
     // ════════════════════════════════════════════════════════════════════
-    // FIX DUPLIKASI #2 — Cek apakah sudah ada pembayaran SUCCESS midtrans
-    // lain untuk tagihan ini SEBELUM kita insert/update apapun. Ini jaring
-    // pengaman kedua selain idempotency check di atas, untuk kasus dua
-    // order_id berbeda merujuk ke tagihan yang sama (edge case retry user).
+    // FIX DUPLIKASI #2
     // ════════════════════════════════════════════════════════════════════
     if (statusPembayaranRecord === "SUCCESS") {
       const { data: alreadySuccess } = await supabase
@@ -165,8 +172,6 @@ export async function POST(request: NextRequest) {
           })
           .eq("idtagihansiswa", tagihanId);
 
-        // Tetap catat log ini sebagai "processed" agar retry Midtrans
-        // berikutnya berhenti di idempotency check paling atas.
         await supabase.from("payment_gateway_log").insert({
           idpembayaran: alreadySuccess.idpembayaran,
           orderid: midtransOrderId,
@@ -187,12 +192,14 @@ export async function POST(request: NextRequest) {
       updatedat: new Date().toISOString(),
     };
 
-    if (statuspembayaranTagihan === "LUNAS") {
-      updateData.jumlahterbayar = jumlahTagihan; // full payment
+    if (statusPembayaranRecord === "SUCCESS") {
+      updateData.jumlahterbayar = terbayarBaruUntukLog;
     }
 
+    // paymenttoken hanya direset kalau transaksi tidak sukses (expire/cancel/deny)
+    // supaya wali bisa generate link pembayaran baru untuk sisa tagihannya.
     if (
-      statuspembayaranTagihan === "KADALUARSA" ||
+      transaction_status === "expire" ||
       transaction_status === "cancel" ||
       transaction_status === "deny"
     ) {
@@ -209,6 +216,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Gagal update tagihan" }, { status: 500 });
     }
 
+    // Sisa tagihan SETELAH transaksi ini — snapshot immutable untuk riwayat.
+    const sisaSetelahTransaksiIni =
+      statusPembayaranRecord === "SUCCESS"
+        ? Math.max(0, jumlahTagihan - terbayarBaruUntukLog)
+        : Math.max(0, jumlahTagihan - sudahBayarSebelumnya);
+
     // ─── Update / insert record pembayaran ──────────────────────────────
     let pembayaranId: number | null = null;
     let updated = false;
@@ -221,6 +234,7 @@ export async function POST(request: NextRequest) {
           tanggalpembayaran: new Date().toISOString(),
           metodepembayaran,
           jumlahdibayar: nominalBayar,
+          sisa_setelah_transaksi_ini: sisaSetelahTransaksiIni,
         })
         .eq("idpembayaran", parseInt(pembayaranIdFromOrder));
 
@@ -247,6 +261,7 @@ export async function POST(request: NextRequest) {
             tanggalpembayaran: new Date().toISOString(),
             metodepembayaran,
             jumlahdibayar: nominalBayar,
+            sisa_setelah_transaksi_ini: sisaSetelahTransaksiIni,
           })
           .eq("idpembayaran", existingPending.idpembayaran);
 
@@ -270,13 +285,11 @@ export async function POST(request: NextRequest) {
           tanggalpembayaran: new Date().toISOString(),
           metodepembayaran,
           statuspembayaran: statusPembayaranRecord,
+          sisa_setelah_transaksi_ini: sisaSetelahTransaksiIni,
         })
         .select("idpembayaran")
         .single();
 
-      // Kalau gagal karena melanggar unique index (uniq_midtrans_success_per_tagihan
-      // dari migration), berarti ada race condition lain yang menang lebih dulu.
-      // Jangan dianggap error fatal — cukup log & lanjut tanpa insert pembayaran baru.
       if (insertPembayaranError) {
         console.warn(
           "⚠️ [WEBHOOK] Insert pembayaran gagal (kemungkinan duplikat ditolak constraint):",
@@ -288,10 +301,6 @@ export async function POST(request: NextRequest) {
     }
     // ────────────────────────────────────────────────────────────────────
 
-    // Log ke payment_gateway_log — orderid sudah unique constraint,
-    // jadi kalau ada race condition dobel-insert webhook, salah satu
-    // akan gagal di sini secara aman (idempotency check di awal seharusnya
-    // sudah mencegah ini, tapi constraint ini jaring pengaman terakhir).
     if (pembayaranId !== null) {
       const { error: logError } = await supabase
         .from("payment_gateway_log")
@@ -314,7 +323,7 @@ export async function POST(request: NextRequest) {
       `✅ [WEBHOOK] Done: tagihan=${tagihanId}, status=${statuspembayaranTagihan}, pembayaranId=${pembayaranId}`
     );
 
-    // Kirim kwitansi email hanya saat sukses
+    // Kirim notifikasi hanya saat transaksi benar-benar sukses
     if (
       pembayaranId !== null &&
       (transaction_status === "settlement" || transaction_status === "capture")
@@ -341,20 +350,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Untuk expire/cancel/deny: TIDAK mengirim notifikasi "gagal" otomatis
+    // ke wali kalau ini cuma link kadaluarsa — karena tagihan tetap valid
+    // dan wali akan tetap melihatnya di halaman tagihan / dapat reminder biasa.
+    // Kalau kamu tetap mau menginformasikan "link kadaluarsa, silakan bayar
+    // ulang", kirim lewat template notifikasiTagihan (bukan PAYMENT_FAILED)
+    // supaya tidak kesannya tagihan itu sendiri yang gagal/invalid.
     if (
       pembayaranId !== null &&
-      (transaction_status === "cancel" ||
-        transaction_status === "deny" ||
-        transaction_status === "expire")
+      (transaction_status === "cancel" || transaction_status === "deny")
     ) {
       if (process.env.FONNTE_API_KEY) {
         const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-        const statusMap: Record<string, "FAILED" | "EXPIRED"> = {
-          cancel: "FAILED",
-          deny: "FAILED",
-          expire: "EXPIRED",
-        };
-
         try {
           await fetch(`${appUrl}/api/notifications/send-payment-status`, {
             method: "POST",
@@ -362,12 +369,9 @@ export async function POST(request: NextRequest) {
             body: JSON.stringify({
               idPembayaran: pembayaranId,
               idTagihan: parseInt(tagihanId),
-              status: statusMap[transaction_status] || "FAILED",
+              status: "FAILED",
             }),
           });
-          console.log(
-            `📱 [WEBHOOK] WhatsApp payment failed notification queued for pembayaran ${pembayaranId}`
-          );
         } catch (whatsappError) {
           console.error(`⚠️ [WEBHOOK] Gagal kirim WhatsApp notification:`, whatsappError);
         }

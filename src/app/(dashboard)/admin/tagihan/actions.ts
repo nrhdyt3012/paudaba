@@ -34,7 +34,6 @@ async function getTagihanPermission(supabase: any, idTagihan: string) {
     return { ok: false, reason: "Tagihan tidak ditemukan", tagihan: null };
   }
 
-  // Pastikan pembayaranList selalu array
   const pembayaranList: any[] = Array.isArray(tagihan.pembayaran)
     ? tagihan.pembayaran
     : tagihan.pembayaran
@@ -50,12 +49,10 @@ async function getTagihanPermission(supabase: any, idTagihan: string) {
       p.statuspembayaran === "SUCCESS" && p.metodepembayaran !== "cash"
   );
 
-  // Semua ID pembayaran yang bukan SUCCESS (PENDING, FAILED, EXPIRED)
   const nonSuccessIds = pembayaranList
     .filter((p: any) => p.statuspembayaran !== "SUCCESS")
     .map((p: any) => p.idpembayaran);
 
-  // Semua ID pembayaran (untuk hapus gateway log)
   const allPembayaranIds = pembayaranList.map((p: any) => p.idpembayaran);
 
   return {
@@ -63,6 +60,8 @@ async function getTagihanPermission(supabase: any, idTagihan: string) {
     tagihan,
     hasSuccessPayment,
     hasMidtransPayment,
+    // Cicilan cash tetap boleh dilanjutkan selama belum LUNAS dan belum ada
+    // pembayaran midtrans yang melunasinya.
     canBayarManual:
       !hasMidtransPayment && tagihan.statuspembayaran !== "LUNAS",
     canDelete: !hasSuccessPayment,
@@ -71,7 +70,7 @@ async function getTagihanPermission(supabase: any, idTagihan: string) {
   };
 }
 
-// ─── Bayar Manual ─────────────────────────────────────────────────────────────
+// ─── Bayar Manual (cash, boleh cicilan) ───────────────────────────────────────
 export async function bayarTagihanManual(prevState: any, formData: FormData) {
   const idTagihan = formData.get("idtagihansiswa") as string;
   const jumlahBayar = parseFloat(formData.get("jumlahbayar") as string);
@@ -115,7 +114,17 @@ export async function bayarTagihanManual(prevState: any, formData: FormData) {
   }
 
   const terbayarBaru = sudahBayar + jumlahBayar;
-  const statusBaru = terbayarBaru >= totalTagihan ? "LUNAS" : "BELUM BAYAR";
+  const sisaSetelahIni = Math.max(0, totalTagihan - terbayarBaru);
+
+  // FIX poin 3: cicilan yang belum melunasi total HARUS berstatus
+  // "BELUM LUNAS", bukan tetap "BELUM BAYAR" (yang membuatnya seolah belum
+  // ada uang masuk sama sekali) dan bukan juga langsung "LUNAS".
+  const statusBaru =
+    terbayarBaru >= totalTagihan
+      ? "LUNAS"
+      : terbayarBaru > 0
+      ? "BELUM LUNAS"
+      : "BELUM BAYAR";
 
   const { error: updateError } = await supabase
     .from("tagihan_siswa")
@@ -133,6 +142,9 @@ export async function bayarTagihanManual(prevState: any, formData: FormData) {
     };
   }
 
+  // FIX poin 8: simpan snapshot sisa SAAT transaksi ini terjadi, immutable,
+  // supaya Riwayat Pembayaran & kwitansi tidak salah tampil kalau tagihan
+  // sudah lunas di kemudian hari.
   const { data: pembayaranData, error: insertError } = await supabase
     .from("pembayaran")
     .insert({
@@ -142,6 +154,7 @@ export async function bayarTagihanManual(prevState: any, formData: FormData) {
       tanggalpembayaran: new Date().toISOString(),
       metodepembayaran: "cash",
       statuspembayaran: "SUCCESS",
+      sisa_setelah_transaksi_ini: sisaSetelahIni,
     })
     .select("idpembayaran")
     .single();
@@ -159,13 +172,15 @@ export async function bayarTagihanManual(prevState: any, formData: FormData) {
     jenisaksi: "UBAH",
     deskripsi: `Mencatat pembayaran cash sebesar Rp${jumlahBayar.toLocaleString(
       "id-ID"
-    )} untuk ${namaSiswa} - ${namaTagihan} (${tagihan.bulan}/${tagihan.tahun})`,
+    )} untuk ${namaSiswa} - ${namaTagihan} (${tagihan.bulan}/${tagihan.tahun}) — status: ${statusBaru}`,
   });
 
   revalidatePath("/admin/tagihan");
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
+  // FIX poin 6: kirim status LUNAS/BELUM LUNAS yang sebenarnya ke endpoint
+  // notifikasi, supaya pesan WA tidak selalu bilang "LUNAS" untuk cicilan.
   if (pembayaranData?.idpembayaran) {
     if (process.env.FONNTE_API_KEY) {
       try {
@@ -189,7 +204,7 @@ export async function bayarTagihanManual(prevState: any, formData: FormData) {
     data: {
       idpembayaran: pembayaranData?.idpembayaran,
       jumlahbayar: jumlahBayar,
-      sisatagihan: totalTagihan - terbayarBaru,
+      sisatagihan: sisaSetelahIni,
       statusbaru: statusBaru,
     },
   };
@@ -228,13 +243,11 @@ export async function deleteTagihanSiswa(prevState: any, formData: FormData) {
   const namaSiswa = first(tagihan.siswa)?.namasiswa || "-";
   const namaTagihan = first(tagihan.master_tagihan)?.namatagihan || "-";
 
-  // STEP 1: Hapus whatsapp_notification_logs yang FK ke tagihan ini
   await supabase
     .from("whatsapp_notification_logs")
     .delete()
     .eq("target_id", parseInt(idTagihan));
 
-  // STEP 2: Hapus payment_gateway_log yang FK ke pembayaran non-SUCCESS
   if (perm.nonSuccessIds && perm.nonSuccessIds.length > 0) {
     await supabase
       .from("payment_gateway_log")
@@ -242,7 +255,6 @@ export async function deleteTagihanSiswa(prevState: any, formData: FormData) {
       .in("idpembayaran", perm.nonSuccessIds);
   }
 
-  // STEP 3: Hapus pembayaran non-SUCCESS (PENDING, FAILED, EXPIRED)
   if (perm.nonSuccessIds && perm.nonSuccessIds.length > 0) {
     const { error: deletePembayaranError } = await supabase
       .from("pembayaran")
@@ -265,7 +277,6 @@ export async function deleteTagihanSiswa(prevState: any, formData: FormData) {
     }
   }
 
-  // STEP 4: Hapus tagihan
   const { error: deleteError } = await supabase
     .from("tagihan_siswa")
     .delete()

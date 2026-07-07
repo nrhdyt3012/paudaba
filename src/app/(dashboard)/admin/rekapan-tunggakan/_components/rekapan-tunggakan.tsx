@@ -4,8 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/client";
 import { convertIDR } from "@/lib/utils";
-import DialogTagihMassal from "./dialog-tagih-massal";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
   ChevronLeft,
   ChevronRight,
@@ -15,6 +14,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 import {
   BarChart,
   Bar,
@@ -41,6 +41,18 @@ const BULAN_SINGKAT = [
 
 const COLOR_ACTIVE = "#dc2626";
 const COLOR_INACTIVE = "#fca5a5";
+
+// FIX poin 3: tunggakan sekarang mencakup status "BELUM BAYAR" DAN
+// "BELUM LUNAS" (cicilan). Sebelumnya cuma "BELUM BAYAR", jadi tagihan
+// yang sudah dicicil sebagian HILANG dari rekapan ini.
+const STATUS_TUNGGAKAN = ["BELUM BAYAR", "BELUM LUNAS"];
+
+// Helper: sisa tagihan = jumlahtagihan - jumlahterbayar (bukan nominal penuh)
+const hitungSisa = (item: any) =>
+  Math.max(
+    0,
+    parseFloat(item.jumlahtagihan || "0") - parseFloat(item.jumlahterbayar || "0")
+  );
 
 // ─── Custom Tooltip ────────────────────────────────────────────────────────────
 const CustomTooltip = ({ active, payload, label }: any) => {
@@ -138,11 +150,10 @@ const MonthYearPicker = ({
 // ─── Komponen Utama ────────────────────────────────────────────────────────────
 export default function RekapanTunggakan() {
   const supabase = createClient();
-  const queryClient = useQueryClient();
+  const router = useRouter();
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [showPicker, setShowPicker] = useState(false);
-  const [showTagihMassal, setShowTagihMassal] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -164,6 +175,7 @@ export default function RekapanTunggakan() {
         .select(`
           idtagihansiswa,
           jumlahtagihan,
+          jumlahterbayar,
           statuspembayaran,
           bulan,
           tahun,
@@ -171,7 +183,7 @@ export default function RekapanTunggakan() {
           siswa:siswa!idsiswa(id, namasiswa, kelas, nowa, nis),
           master_tagihan:master_tagihan!idmastertagihan(namatagihan, jenjang, jenistagihan)
         `)
-        .eq("statuspembayaran", "BELUM BAYAR")
+        .in("statuspembayaran", STATUS_TUNGGAKAN)
         .eq("bulan", selectedMonth)
         .eq("tahun", selectedYear)
         .order("createdat", { ascending: false });
@@ -199,12 +211,17 @@ export default function RekapanTunggakan() {
           .from("tagihan_siswa")
           .select(`
             idtagihansiswa,
+            jumlahtagihan,
+            jumlahterbayar,
             master_tagihan:master_tagihan!idmastertagihan(jenjang, jenistagihan)
           `)
-          .eq("statuspembayaran", "BELUM BAYAR")
+          .in("statuspembayaran", STATUS_TUNGGAKAN)
           .eq("bulan", m)
           .eq("tahun", y);
 
+        // FIX poin 3: grafik menghitung berdasarkan SISA (dan tetap
+        // menghitung jumlah baris tunggakan untuk breakdown per jenjang),
+        // bukan menganggap semua tunggakan senilai nominal penuh.
         const breakdown: Record<string, number> = {};
         (data || []).forEach((item: any) => {
           const jenjang = item.master_tagihan?.jenjang || "Lainnya";
@@ -213,11 +230,17 @@ export default function RekapanTunggakan() {
           breakdown[key] = (breakdown[key] || 0) + 1;
         });
 
+        const totalSisa = (data || []).reduce(
+          (s: number, item: any) => s + hitungSisa(item),
+          0
+        );
+
         results.push({
           name: `${BULAN_SINGKAT[m]} ${y.toString().slice(2)}`,
           bulan: m,
           tahun: y,
           total: (data || []).length,
+          totalSisa,
           breakdown,
         });
       }
@@ -225,12 +248,9 @@ export default function RekapanTunggakan() {
     },
   });
 
+  // FIX poin 3: total nominal tunggakan pakai SISA, bukan jumlahtagihan penuh
   const totalNominal = useMemo(
-    () =>
-      tunggakanData?.reduce(
-        (s: number, i: any) => s + parseFloat(i.jumlahtagihan || 0),
-        0
-      ) || 0,
+    () => tunggakanData?.reduce((s: number, i: any) => s + hitungSisa(i), 0) || 0,
     [tunggakanData]
   );
 
@@ -256,17 +276,16 @@ export default function RekapanTunggakan() {
       Jenjang: item.master_tagihan?.jenjang || "-",
       Bulan: BULAN_NAMA[item.bulan],
       Tahun: item.tahun,
-      "Jumlah Tunggakan": parseFloat(item.jumlahtagihan || 0),
+      "Nominal Tagihan": parseFloat(item.jumlahtagihan || 0),
+      "Sudah Dibayar": parseFloat(item.jumlahterbayar || 0),
+      "Sisa Tunggakan": hitungSisa(item),
+      Status: item.statuspembayaran,
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Tunggakan");
     XLSX.writeFile(wb, `Tunggakan_${BULAN_NAMA[selectedMonth]}_${selectedYear}.xlsx`);
     toast.success("Data berhasil diekspor");
-  };
-
-  const refetchTunggakan = () => {
-    queryClient.invalidateQueries({ queryKey: ["rekapan-tunggakan", selectedMonth, selectedYear] });
   };
 
   return (
@@ -345,7 +364,7 @@ export default function RekapanTunggakan() {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm">Total Nominal Tunggakan</CardTitle>
+            <CardTitle className="text-sm">Total Sisa Tunggakan</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold text-red-600">{convertIDR(totalNominal)}</p>
@@ -357,7 +376,7 @@ export default function RekapanTunggakan() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>
-            Daftar Siswa Belum Bayar
+            Daftar Siswa Menunggak
             <span className="ml-2 text-sm font-normal text-muted-foreground">
               {BULAN_NAMA[selectedMonth]} {selectedYear}
             </span>
@@ -372,8 +391,10 @@ export default function RekapanTunggakan() {
               <Download className="mr-2 h-4 w-4" />
               Export Excel
             </Button>
+            {/* FIX poin 4: sekarang navigasi ke HALAMAN PENUH (bukan popup),
+                yang sudah menggabungkan tagihan per siswa. */}
             <Button
-              onClick={() => setShowTagihMassal(true)}
+              onClick={() => router.push("/admin/rekapan-tunggakan/reminder")}
               disabled={!tunggakanData?.length}
               size="sm"
               className="bg-green-600 hover:bg-green-700"
@@ -400,7 +421,7 @@ export default function RekapanTunggakan() {
                     <th className="text-left p-3">Kelas</th>
                     <th className="text-left p-3">No. WA Wali</th>
                     <th className="text-left p-3">Tagihan</th>
-                    <th className="text-right p-3">Nominal</th>
+                    <th className="text-right p-3">Sisa</th>
                     <th className="text-center p-3">Status</th>
                   </tr>
                 </thead>
@@ -412,12 +433,19 @@ export default function RekapanTunggakan() {
                       <td className="p-3">{item.siswa?.kelas || "-"}</td>
                       <td className="p-3">{item.siswa?.nowa || "-"}</td>
                       <td className="p-3">{item.master_tagihan?.namatagihan || "-"}</td>
+                      {/* FIX poin 3: tampilkan SISA, bukan nominal penuh */}
                       <td className="p-3 text-right font-semibold">
-                        {convertIDR(parseFloat(item.jumlahtagihan || 0))}
+                        {convertIDR(hitungSisa(item))}
                       </td>
                       <td className="p-3 text-center">
-                        <span className="px-2 py-1 rounded-full text-xs bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100">
-                          Belum Bayar
+                        <span
+                          className={`px-2 py-1 rounded-full text-xs ${
+                            item.statuspembayaran === "BELUM LUNAS"
+                              ? "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100"
+                              : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100"
+                          }`}
+                        >
+                          {item.statuspembayaran === "BELUM LUNAS" ? "Belum Lunas" : "Belum Bayar"}
                         </span>
                       </td>
                     </tr>
@@ -425,7 +453,7 @@ export default function RekapanTunggakan() {
                 </tbody>
                 <tfoot>
                   <tr className="border-t-2 font-bold bg-muted/30">
-                    <td colSpan={5} className="p-3 text-right">Total:</td>
+                    <td colSpan={5} className="p-3 text-right">Total Sisa:</td>
                     <td className="p-3 text-right text-red-600">{convertIDR(totalNominal)}</td>
                     <td />
                   </tr>
@@ -435,14 +463,6 @@ export default function RekapanTunggakan() {
           )}
         </CardContent>
       </Card>
-
-      {/* ─── Dialog Tagih Massal via WhatsApp ──────────────────────────────── */}
-      <DialogTagihMassal
-        open={showTagihMassal}
-        onOpenChange={setShowTagihMassal}
-        data={tunggakanData || []}
-        onSelesai={refetchTunggakan}
-      />
     </div>
   );
 }

@@ -33,6 +33,9 @@ export async function POST(request: NextRequest) {
 
     const supabase = await createClient({ isAdmin: true });
 
+    // FIX poin 5/6: sertakan jumlahterbayar & statuspembayaran TAGIHAN
+    // (bukan cuma jumlahtagihan) supaya bisa dihitung isLunas & sisa yang
+    // sebenarnya — bukan diasumsikan selalu lunas.
     const { data: pembayaran, error: pembayaranError } = await supabase
       .from("pembayaran")
       .select(
@@ -43,8 +46,11 @@ export async function POST(request: NextRequest) {
         jumlahdibayar,
         tanggalpembayaran,
         statuspembayaran,
+        sisa_setelah_transaksi_ini,
         tagihan_siswa(
           jumlahtagihan,
+          jumlahterbayar,
+          statuspembayaran,
           master_tagihan(namatagihan)
         ),
         siswa(namasiswa, nowa, namawali, kelas)
@@ -85,7 +91,6 @@ export async function POST(request: NextRequest) {
     if (status === "SUCCESS") {
       const linkKwitansi = `${appUrl}/kwitansi/${idPembayaran}`;
 
-      // Format tanggal pembayaran dengan WIB
       const tanggalFormatted = new Date(pembayaran.tanggalpembayaran).toLocaleDateString(
         "id-ID",
         {
@@ -96,6 +101,20 @@ export async function POST(request: NextRequest) {
           minute: "2-digit",
         }
       ) + " WIB";
+
+      // FIX poin 5/6: pakai snapshot sisa_setelah_transaksi_ini kalau ada
+      // (immutable, akurat pada saat transaksi ini terjadi). Fallback ke
+      // hitungan live dari tagihan_siswa kalau kolom snapshot belum terisi
+      // (data lama sebelum migration).
+      const isLunas = tagihan?.statuspembayaran === "LUNAS";
+      const sisaTagihan =
+        pembayaran.sisa_setelah_transaksi_ini != null
+          ? Number(pembayaran.sisa_setelah_transaksi_ini)
+          : Math.max(
+              0,
+              parseFloat(tagihan?.jumlahtagihan || "0") -
+                parseFloat(tagihan?.jumlahterbayar || "0")
+            );
 
       result = await whatsAppService.sendNotification({
         recipientPhone: siswa.nowa,
@@ -109,6 +128,8 @@ export async function POST(request: NextRequest) {
           tanggalPembayaran: tanggalFormatted,
           linkKwitansi,
           kelas: siswa.kelas || "",
+          isLunas,
+          sisaTagihan,
         },
       });
     } else if (status === "FAILED") {

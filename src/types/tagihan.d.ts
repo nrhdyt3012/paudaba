@@ -10,6 +10,11 @@ export type TagihanFormState = {
   };
 };
 
+// "KADALUARSA" sengaja dihapus dari status tagihan — itu status transaksi
+// (level `pembayaran`/Midtrans), bukan status tagihan. Kalau link Midtrans
+// hangus, tagihan tetap "BELUM BAYAR" / "BELUM LUNAS", bukan "KADALUARSA".
+export type StatusPembayaranTagihan = "BELUM BAYAR" | "BELUM LUNAS" | "LUNAS";
+
 export type TagihanSiswa = {
   idTagihanSiswa: number;
   idSiswa: string;
@@ -19,7 +24,7 @@ export type TagihanSiswa = {
   jumlahTagihan: number;
   jumlahTerbayar: number;
   sisa: number;
-  statuspembayaran: "BELUM BAYAR" | "LUNAS" | "KADALUARSA";
+  statuspembayaran: StatusPembayaranTagihan;
   paymentToken: string | null;
   createdAt: string;
   updatedAt: string;

@@ -25,6 +25,8 @@ import {
 import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 
+const STATUS_TUNGGAKAN = ["BELUM BAYAR", "BELUM LUNAS"] as const;
+
 export default function Dashboard() {
   const supabase = createClient();
   const currentMonth = new Date().getMonth() + 1;
@@ -89,7 +91,7 @@ export default function Dashboard() {
 
       const { count: total } = await base();
       const { count: lunas } = await base().eq("statuspembayaran", "LUNAS");
-      const { count: belumBayar } = await base().eq("statuspembayaran", "BELUM BAYAR");
+      const { count: belumBayar } = await base().in("statuspembayaran", STATUS_TUNGGAKAN);
 
       return { total: total || 0, lunas: lunas || 0, belumBayar: belumBayar || 0 };
     },
@@ -121,16 +123,16 @@ export default function Dashboard() {
 
       let belumQuery = supabase
         .from("tagihan_siswa")
-        .select("jumlahtagihan")
+        .select("sisa")
         .eq("bulan", currentMonth)
         .eq("tahun", currentYear)
-        .eq("statuspembayaran", "BELUM BAYAR");
+        .in("statuspembayaran", STATUS_TUNGGAKAN);
       if (angkatan !== "semua") belumQuery = belumQuery.in("idsiswa", idList);
       const { data: tunggakanData } = await belumQuery;
 
       const tunggakanBulanIni =
         tunggakanData?.reduce(
-          (sum: number, item: any) => sum + parseFloat(item.jumlahtagihan || "0"),
+          (sum: number, item: any) => sum + parseFloat(item.sisa || "0"),
           0
         ) || 0;
 
@@ -150,6 +152,7 @@ export default function Dashboard() {
         .select(`
           idtagihansiswa,
           jumlahtagihan,
+          sisa,
           statuspembayaran,
           bulan,
           tahun,
@@ -157,7 +160,7 @@ export default function Dashboard() {
           siswa:siswa!idsiswa(id, namasiswa, kelas, nowa, nis),
           master_tagihan:master_tagihan!idmastertagihan(namatagihan, jenjang, jenistagihan)
         `)
-        .eq("statuspembayaran", "BELUM BAYAR")
+        .in("statuspembayaran", STATUS_TUNGGAKAN)
         .order("createdat", { ascending: false });
 
       if (angkatan !== "semua") query = query.in("idsiswa", idList);
@@ -406,26 +409,13 @@ export default function Dashboard() {
                 <thead className="sticky top-0 bg-background z-20">
                   <tr className="border-b bg-muted">
                     <th className="w-16 p-3 text-left">No</th>
-
-                    <th className="w-72 p-3 text-left">
-                      Nama Siswa
-                    </th>
-
-                    <th className="w-24 p-3 text-left">
-                      Kelas
-                    </th>
-
-                    <th className="w-48 p-3 text-left">
-                      No. WA Wali
-                    </th>
-
-                    <th className="p-3 text-left">
-                      Tagihan
-                    </th>
-
-                    <th className="w-44 p-3 text-right">
-                      Nominal
-                    </th>
+                    <th className="w-28 p-3 text-left">ID</th>
+                    <th className="w-72 p-3 text-left">Nama Siswa</th>
+                    <th className="p-3 text-left">Tagihan</th>
+                    <th className="w-44 p-3 text-right">Nominal</th>
+                    <th className="w-44 p-3 text-right">Sisa Tagihan</th>
+                    <th className="w-44 p-3 text-left">Status</th>
+                    <th className="w-40 p-3 text-left">Tanggal</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -434,12 +424,31 @@ export default function Dashboard() {
                       <td className="p-3 text-muted-foreground">
                         {(currentPage - 1) * ITEMS_PER_PAGE + i + 1}
                       </td>
+                      <td className="p-3 font-mono text-sm">#{item.idtagihansiswa}</td>
                       <td className="p-3 font-medium">{item.siswa?.namasiswa || "-"}</td>
-                      <td className="p-3">{item.siswa?.kelas || "-"}</td>
-                      <td className="p-3">{item.siswa?.nowa || "-"}</td>
-                      <td className="p-3">{item.master_tagihan?.namatagihan || "-"}</td>
+                      <td className="p-3">
+                        <div className="font-semibold">{item.master_tagihan?.namatagihan || "-"}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {item.bulan}/{item.tahun} · {item.master_tagihan?.jenjang || ""}
+                        </div>
+                      </td>
                       <td className="p-3 text-right font-semibold text-red-600">
                         {convertIDR(parseFloat(item.jumlahtagihan || 0))}
+                      </td>
+                      <td className="p-3 text-right font-semibold">
+                        {convertIDR(parseFloat(item.sisa || 0))}
+                      </td>
+                      <td className="p-3">
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                          {item.statuspembayaran}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        {new Date(item.createdat).toLocaleDateString("id-ID", {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })}
                       </td>
                     </tr>
                   ))}

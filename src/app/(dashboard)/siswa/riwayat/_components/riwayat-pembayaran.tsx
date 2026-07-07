@@ -24,6 +24,9 @@ type PembayaranItem = {
   tanggalpembayaran: string;
   metodepembayaran: string;
   statuspembayaran: string;
+  // FIX poin 8: snapshot immutable, diisi SEKALI saat transaksi terjadi.
+  // Bisa null untuk data lama sebelum migration dijalankan.
+  sisa_setelah_transaksi_ini: string | number | null;
 };
 
 type TagihanItem = {
@@ -91,7 +94,8 @@ export default function RiwayatPembayaran() {
             jumlahdibayar,
             tanggalpembayaran,
             metodepembayaran,
-            statuspembayaran
+            statuspembayaran,
+            sisa_setelah_transaksi_ini
           )
         `)
         .eq("idsiswa", profile.id)
@@ -106,7 +110,10 @@ export default function RiwayatPembayaran() {
     },
   });
 
-  // Query semua tagihan BELUM BAYAR milik siswa ini untuk ditampilkan di kwitansi
+  // Query semua tagihan yang MASIH TUNGGAKAN (belum bayar ATAU belum lunas)
+  // milik siswa ini untuk ditampilkan di kwitansi sebagai "tagihan lain".
+  // FIX: sebelumnya cuma "BELUM BAYAR", sekarang mencakup "BELUM LUNAS" juga
+  // supaya tagihan yang sudah dicicil sebagian tetap muncul di sini.
   const { data: sisaTagihanList } = useQuery({
     queryKey: ["sisa-tagihan-belum-bayar", profile.id],
     enabled: !!profile.id,
@@ -121,7 +128,7 @@ export default function RiwayatPembayaran() {
           master_tagihan:master_tagihan!idmastertagihan(namatagihan)
         `)
         .eq("idsiswa", profile.id)
-        .eq("statuspembayaran", "BELUM BAYAR")
+        .in("statuspembayaran", ["BELUM BAYAR", "BELUM LUNAS"])
         .order("tahun", { ascending: false })
         .order("bulan", { ascending: false });
       return (data as unknown as SisaTagihanItem[]) || [];
@@ -131,12 +138,17 @@ export default function RiwayatPembayaran() {
   const getStatusBadge = (status: string) => {
     const config: Record<string, string> = {
       "BELUM BAYAR": "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100",
+      "BELUM LUNAS": "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100",
       "LUNAS": "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
-      "KADALUARSA": "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
+    };
+    const label: Record<string, string> = {
+      "BELUM BAYAR": "Belum Bayar",
+      "BELUM LUNAS": "Belum Lunas",
+      "LUNAS": "Lunas",
     };
     return (
       <span className={cn("px-2 py-1 rounded-full text-xs font-medium", config[status] || config["BELUM BAYAR"])}>
-        {status}
+        {label[status] || status}
       </span>
     );
   };
@@ -356,18 +368,25 @@ function PrintButtonSingle({
   });
  
   const jumlahBayar = parseFloat(pembayaran.jumlahdibayar || "0");
-  const sudahBayarSetelahIni = parseFloat(tagihan.jumlahterbayar || "0");
-  const sisaSetelahIni = Math.max(0, totalTagihan - sudahBayarSetelahIni);
-  const isLunas =
-    tagihan.statuspembayaran === "LUNAS" &&
-    pembayaran.statuspembayaran === "SUCCESS";
+
+  // FIX poin 8 — INTI PERBAIKAN:
+  // Sebelumnya sisa dihitung LIVE dari `tagihan.jumlahterbayar` (kondisi
+  // SEKARANG), sehingga kwitansi transaksi cicilan pertama akan salah
+  // menampilkan "sisa Rp 0" kalau tagihan itu SUDAH lunas di kemudian hari.
+  // Sekarang pakai snapshot `sisa_setelah_transaksi_ini` yang immutable,
+  // diisi sekali saat transaksi itu terjadi (lihat actions.ts & webhook).
+  // Fallback ke hitungan live HANYA untuk data lama sebelum migration
+  // dijalankan (kolom snapshot masih null).
+  const sisaSetelahIni =
+    pembayaran.sisa_setelah_transaksi_ini != null
+      ? Math.max(0, Number(pembayaran.sisa_setelah_transaksi_ini))
+      : Math.max(0, totalTagihan - parseFloat(tagihan.jumlahterbayar || "0"));
+
+  const isLunas = sisaSetelahIni <= 0 && pembayaran.statuspembayaran === "SUCCESS";
  
   const tglBayar = new Date(pembayaran.tanggalpembayaran);
   const noKwitansi = `${tagihan.idtagihansiswa}/${pembayaran.idpembayaran}/${tglBayar.getFullYear()}`;
  
-  // Generate QR code begitu komponen mount — link-nya SAMA dengan
-  // linkKwitansi yang dikirim via WhatsApp (lihat send-payment-status/route.ts),
-  // supaya QR di hasil cetak konsisten dengan link yang sudah diterima wali.
   useEffect(() => {
     const appUrl =
       process.env.NEXT_PUBLIC_APP_URL || window.location.origin;

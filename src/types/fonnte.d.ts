@@ -60,7 +60,7 @@ export interface FontneWebhookPayload {
 export interface WhatsAppNotificationLog {
   id: number;
   recipient_phone: string;
-  message_type: 'TAGIHAN' | 'PAYMENT_SUCCESS' | 'PAYMENT_FAILED';
+  message_type: 'TAGIHAN' | 'PAYMENT_SUCCESS' | 'PAYMENT_FAILED' | 'REMINDER_GABUNGAN';
   target_id: number | null;
   message_content: string;
   delivery_status: 'PENDING' | 'SENT' | 'DELIVERED' | 'FAILED';
@@ -72,7 +72,9 @@ export interface WhatsAppNotificationLog {
 
 export interface NotificationPayload {
   recipientPhone: string;
-  messageType: 'TAGIHAN' | 'PAYMENT_SUCCESS' | 'PAYMENT_FAILED';
+  // FIX poin 4: tambah 'REMINDER_GABUNGAN' untuk reminder tunggakan yang
+  // merangkum beberapa tagihan sekaligus jadi satu pesan per siswa.
+  messageType: 'TAGIHAN' | 'PAYMENT_SUCCESS' | 'PAYMENT_FAILED' | 'REMINDER_GABUNGAN';
   targetId?: number;
   recipientName: string;
   studentName: string;

@@ -79,7 +79,7 @@ export default function TagihanSiswaPage() {
           )
         `)
         .eq("idsiswa", profile.id)
-        .in("statuspembayaran", ["BELUM BAYAR", "KADALUARSA"])
+        .in("statuspembayaran", ["BELUM BAYAR","BELUM LUNAS", "KADALUARSA"])
         .order("tahun", { ascending: false })
         .order("bulan", { ascending: false });
 

@@ -56,6 +56,9 @@ class WhatsAppNotificationService {
           break;
 
         case 'PAYMENT_SUCCESS':
+          // FIX poin 5/6: isLunas & sisaTagihan sekarang WAJIB dikirim oleh
+          // caller (send-payment-status route) supaya pesan tidak selalu
+          // bilang "LUNAS" untuk pembayaran cicilan/parsial.
           message = whatsappTemplates.notifikasiPembayaranBerhasil({
             recipientName: payload.recipientName,
             studentName: payload.studentName,
@@ -64,6 +67,8 @@ class WhatsAppNotificationService {
             tanggalPembayaran: payload.data.tanggalPembayaran || '-',
             linkKwitansi: payload.data.linkKwitansi || '#',
             kelas: payload.data.kelas || '',
+            isLunas: payload.data.isLunas ?? true,
+            sisaTagihan: payload.data.sisaTagihan ?? 0,
           });
           break;
 
@@ -76,6 +81,19 @@ class WhatsAppNotificationService {
             alasan: payload.data.alasan,
             nomorAdmin: payload.data.nomorAdmin,
             kelas: payload.data.kelas || '',
+          });
+          break;
+
+        case 'REMINDER_GABUNGAN':
+          // FIX poin 4: satu pesan merangkum SEMUA tagihan tertunggak
+          // milik satu siswa, dipakai oleh halaman reminder WA yang baru.
+          message = whatsappTemplates.reminderTunggakanGabungan({
+            recipientName: payload.recipientName,
+            studentName: payload.studentName,
+            kelas: payload.data.kelas || '',
+            daftarTagihan: payload.data.daftarTagihan || [],
+            totalSisa: payload.data.totalSisa || 0,
+            linkPembayaran: payload.data.linkPembayaran || '#',
           });
           break;
 
