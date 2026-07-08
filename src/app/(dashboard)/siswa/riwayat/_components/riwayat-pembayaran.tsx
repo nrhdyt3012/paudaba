@@ -2,20 +2,38 @@
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { createClient } from "@/lib/supabase/client";
 import { useAuthStore } from "@/stores/auth-store";
 import { convertIDR, cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Loader2, Receipt, Printer, ChevronDown, ChevronUp } from "lucide-react";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Loader2, Receipt, Printer, ChevronDown, ChevronUp, FileStack, Search, PrinterIcon } from "lucide-react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
 import KwitansiTemplate, { KwitansiData } from "@/components/common/kwitansi-template";
+import LaporanRiwayatTemplate, {
+  LaporanRiwayatData,
+} from "@/components/common/laporan-riwayat-template";
 import { generateQrCodeDataUrl } from "@/lib/kwitansi-helper";
 
 const BULAN_NAMA = [
   "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
   "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+];
+
+const STATUS_FILTER_OPTIONS = [
+  { value: "semua", label: "Semua Status" },
+  { value: "BELUM BAYAR", label: "Belum Bayar" },
+  { value: "BELUM LUNAS", label: "Belum Lunas" },
+  { value: "LUNAS", label: "Lunas" },
 ];
 
 type PembayaranItem = {
@@ -24,8 +42,6 @@ type PembayaranItem = {
   tanggalpembayaran: string;
   metodepembayaran: string;
   statuspembayaran: string;
-  // FIX poin 8: snapshot immutable, diisi SEKALI saat transaksi terjadi.
-  // Bisa null untuk data lama sebelum migration dijalankan.
   sisa_setelah_transaksi_ini: string | number | null;
 };
 
@@ -61,6 +77,8 @@ export default function RiwayatPembayaran() {
   const supabase = createClient();
   const profile = useAuthStore((state) => state.profile);
   const [expandedTagihan, setExpandedTagihan] = useState<Set<number>>(new Set());
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterStatus, setFilterStatus] = useState("semua");
 
   const { data: siswaData } = useQuery({
     queryKey: ["siswa-self-riwayat", profile.id],
@@ -110,10 +128,6 @@ export default function RiwayatPembayaran() {
     },
   });
 
-  // Query semua tagihan yang MASIH TUNGGAKAN (belum bayar ATAU belum lunas)
-  // milik siswa ini untuk ditampilkan di kwitansi sebagai "tagihan lain".
-  // FIX: sebelumnya cuma "BELUM BAYAR", sekarang mencakup "BELUM LUNAS" juga
-  // supaya tagihan yang sudah dicicil sebagian tetap muncul di sini.
   const { data: sisaTagihanList } = useQuery({
     queryKey: ["sisa-tagihan-belum-bayar", profile.id],
     enabled: !!profile.id,
@@ -170,6 +184,27 @@ export default function RiwayatPembayaran() {
       (p) => p.statuspembayaran === "SUCCESS" || p.statuspembayaran === "PARTIAL"
     );
 
+  // FIX: search bar (cari nama tagihan/periode) + filter status, sejajar
+  // dengan judul "Daftar Riwayat Tagihan".
+  const filteredRiwayatList = useMemo(() => {
+    let result = riwayatList || [];
+
+    if (filterStatus !== "semua") {
+      result = result.filter((item) => item.statuspembayaran === filterStatus);
+    }
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter((item) => {
+        const namaTagihan = item.master_tagihan?.namatagihan?.toLowerCase() || "";
+        const periode = `${BULAN_NAMA[item.bulan]} ${item.tahun}`.toLowerCase();
+        return namaTagihan.includes(q) || periode.includes(q);
+      });
+    }
+
+    return result;
+  }, [riwayatList, searchQuery, filterStatus]);
+
   if (isLoading) {
     return (
       <div className="flex justify-center items-center min-h-[400px]">
@@ -197,10 +232,37 @@ export default function RiwayatPembayaran() {
         </Card>
       ) : (
         <Card>
-          <CardHeader>
-            <CardTitle>Daftar Riwayat Tagihan</CardTitle>
+          <CardHeader className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <CardTitle className="shrink-0">Daftar Riwayat Tagihan</CardTitle>
+            {/* FIX: search bar + filter status + tombol cetak laporan
+                menyeluruh, sejajar dengan judul "Daftar Riwayat Tagihan". */}
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+              <div className="relative w-full sm:w-64">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Cari nama tagihan atau periode..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8 h-9"
+                />
+              </div>
+              <Select value={filterStatus} onValueChange={setFilterStatus}>
+                <SelectTrigger className="w-full sm:w-[150px] h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {STATUS_FILTER_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <PrintButtonLaporanMenyeluruh riwayatList={riwayatList} siswaData={siswaData} />
+            </div>
           </CardHeader>
           <CardContent>
+            {filteredRiwayatList.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground text-sm">
+                Tidak ditemukan tagihan yang cocok dengan pencarian/filter ini
+              </div>
+            ) : (
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-sm">
                 <thead>
@@ -216,7 +278,7 @@ export default function RiwayatPembayaran() {
                   </tr>
                 </thead>
                 <tbody>
-                  {riwayatList.map((item, index) => {
+                  {filteredRiwayatList.map((item, index) => {
                     const totalTagihan = parseFloat(item.jumlahtagihan);
                     const sudahBayar = parseFloat(item.jumlahterbayar || "0");
                     const sisa = Math.max(0, totalTagihan - sudahBayar);
@@ -336,10 +398,78 @@ export default function RiwayatPembayaran() {
                 </tbody>
               </table>
             </div>
+            )}
           </CardContent>
         </Card>
       )}
     </div>
+  );
+}
+
+// ─── Tombol cetak laporan riwayat MENYELURUH (semua tagihan digabung) ───────
+function PrintButtonLaporanMenyeluruh({
+  riwayatList,
+  siswaData,
+}: {
+  riwayatList: TagihanItem[];
+  siswaData: any;
+}) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const handlePrint = useReactToPrint({
+    contentRef,
+    documentTitle: `Laporan-Riwayat-${siswaData?.namasiswa || "Siswa"}`,
+  });
+
+  const now = new Date();
+
+  // Rangkum SEMUA transaksi dari SEMUA tagihan jadi satu list, urut
+  // kronologis (paling lama duluan) — persis seperti mutasi rekening.
+  const allItems = riwayatList
+    .flatMap((tagihan) =>
+      (tagihan.pembayaran ?? [])
+        .filter((p) => p.statuspembayaran === "SUCCESS")
+        .map((p) => ({
+          idpembayaran: p.idpembayaran,
+          tanggalpembayaran: p.tanggalpembayaran,
+          namatagihan: tagihan.master_tagihan?.namatagihan || "-",
+          periode: `${BULAN_NAMA[tagihan.bulan]} ${tagihan.tahun}`,
+          totalTagihan: parseFloat(tagihan.jumlahtagihan),
+          jumlahDibayar: parseFloat(p.jumlahdibayar || "0"),
+          sisaSetelahTransaksi:
+            p.sisa_setelah_transaksi_ini != null
+              ? Number(p.sisa_setelah_transaksi_ini)
+              : Math.max(0, parseFloat(tagihan.jumlahtagihan) - parseFloat(tagihan.jumlahterbayar || "0")),
+          metodepembayaran: p.metodepembayaran,
+        }))
+    )
+    .sort(
+      (a, b) => new Date(a.tanggalpembayaran).getTime() - new Date(b.tanggalpembayaran).getTime()
+    );
+
+  const totalDibayarKeseluruhan = allItems.reduce((s, it) => s + it.jumlahDibayar, 0);
+
+  const laporanData: LaporanRiwayatData = {
+    namaSiswa: siswaData?.namasiswa || siswaData?.namaSiswa || "-",
+    kelas: siswaData?.kelas || "-",
+    namaWali: siswaData?.namawali || siswaData?.namaWali || "-",
+    tanggalCetak: now.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" }),
+    jamCetak: now.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }).replace(":", ".") + " WIB",
+    items: allItems,
+    totalDibayarKeseluruhan,
+  };
+
+  return (
+    <>
+      <Button onClick={handlePrint} variant="outline" className="gap-2">
+        <PrinterIcon className="h-4 w-4" />
+        Cetak Laporan Riwayat Menyeluruh
+      </Button>
+      <div className="hidden">
+        <div ref={contentRef}>
+          <LaporanRiwayatTemplate data={laporanData} />
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -369,14 +499,6 @@ function PrintButtonSingle({
  
   const jumlahBayar = parseFloat(pembayaran.jumlahdibayar || "0");
 
-  // FIX poin 8 — INTI PERBAIKAN:
-  // Sebelumnya sisa dihitung LIVE dari `tagihan.jumlahterbayar` (kondisi
-  // SEKARANG), sehingga kwitansi transaksi cicilan pertama akan salah
-  // menampilkan "sisa Rp 0" kalau tagihan itu SUDAH lunas di kemudian hari.
-  // Sekarang pakai snapshot `sisa_setelah_transaksi_ini` yang immutable,
-  // diisi sekali saat transaksi itu terjadi (lihat actions.ts & webhook).
-  // Fallback ke hitungan live HANYA untuk data lama sebelum migration
-  // dijalankan (kolom snapshot masih null).
   const sisaSetelahIni =
     pembayaran.sisa_setelah_transaksi_ini != null
       ? Math.max(0, Number(pembayaran.sisa_setelah_transaksi_ini))

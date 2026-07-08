@@ -2,10 +2,16 @@
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { createClient } from "@/lib/supabase/client";
 import { convertIDR } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Download, Calendar } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Calendar, ImageIcon } from "lucide-react";
 import { useMemo, useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import {
@@ -136,6 +142,7 @@ export default function RekapanPembayaran() {
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [showPicker, setShowPicker] = useState(false);
+  const [buktiPreviewUrl, setBuktiPreviewUrl] = useState<string | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -148,14 +155,6 @@ export default function RekapanPembayaran() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // FIX poin 2/5: Rekapan Pembayaran seharusnya LOG TRANSAKSIONAL — setiap
-  // kali uang masuk (termasuk cicilan parsial) dicatat apa adanya. Query
-  // sebelumnya mengambil dari `tagihan_siswa` yang di-filter status LUNAS,
-  // sehingga (a) cicilan parsial tidak pernah muncul sampai lunas total,
-  // dan (b) begitu lunas, nominal yang tampil adalah nominal tagihan PENUH,
-  // bukan nominal transaksi yang sebenarnya terjadi. Sekarang query langsung
-  // ke tabel `pembayaran` (satu baris = satu transaksi nyata), difilter
-  // berdasarkan tanggal TRANSAKSI terjadi (bukan periode tagihannya).
   const { data: pembayaranData, isLoading } = useQuery({
     queryKey: ["rekapan-pembayaran", selectedMonth, selectedYear],
     queryFn: async () => {
@@ -172,6 +171,7 @@ export default function RekapanPembayaran() {
           metodepembayaran,
           statuspembayaran,
           sisa_setelah_transaksi_ini,
+          bukti_pembayaran_url,
           tagihan_siswa:tagihan_siswa!idtagihansiswa(
             bulan,
             tahun,
@@ -193,7 +193,6 @@ export default function RekapanPembayaran() {
     },
   });
 
-  // ─── Data grafik 6 bulan terakhir (berdasar tanggal transaksi) ──────────
   const { data: chartData } = useQuery({
     queryKey: ["chart-pembayaran"],
     queryFn: async () => {
@@ -241,8 +240,6 @@ export default function RekapanPembayaran() {
     },
   });
 
-  // FIX poin 2/5: total nominal = jumlah UANG YANG BENAR-BENAR MASUK
-  // (jumlahdibayar per transaksi), bukan nominal tagihan penuh.
   const totalNominal = useMemo(
     () =>
       pembayaranData?.reduce(
@@ -285,6 +282,7 @@ export default function RekapanPembayaran() {
         "Sisa Setelah Transaksi Ini": sisa,
         "Status Lunas?": sisa !== null ? (sisa <= 0 ? "Lunas" : "Belum Lunas") : "-",
         "Tanggal Bayar": new Date(item.tanggalpembayaran).toLocaleString("id-ID"),
+        "Ada Bukti?": item.bukti_pembayaran_url ? "Ya" : "Tidak",
       };
     });
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -298,7 +296,6 @@ export default function RekapanPembayaran() {
     <div className="w-full space-y-6">
       <h1 className="text-2xl font-bold">Rekapan Pembayaran</h1>
 
-      {/* ─── Grafik ─────────────────────────────────────────────────────────── */}
       <Card>
         <CardHeader>
           <CardTitle>Grafik Pembayaran (6 Bulan Terakhir)</CardTitle>
@@ -328,7 +325,6 @@ export default function RekapanPembayaran() {
         </CardContent>
       </Card>
 
-      {/* ─── Navigasi periode ───────────────────────────────────────────────── */}
       <div className="flex items-center gap-2">
         <Button variant="outline" size="icon" onClick={handlePrevMonth}>
           <ChevronLeft className="h-4 w-4" />
@@ -356,7 +352,6 @@ export default function RekapanPembayaran() {
         </Button>
       </div>
 
-      {/* ─── Kartu statistik ────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card>
           <CardHeader>
@@ -378,7 +373,6 @@ export default function RekapanPembayaran() {
         </Card>
       </div>
 
-      {/* ─── Tabel pembayaran ────────────────────────────────────────────────── */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>
@@ -417,6 +411,7 @@ export default function RekapanPembayaran() {
                     <th className="text-right p-3">Dibayar (transaksi ini)</th>
                     <th className="text-right p-3">Sisa Setelahnya</th>
                     <th className="text-left p-3">Tanggal</th>
+                    <th className="text-center p-3">Aksi</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -449,6 +444,22 @@ export default function RekapanPembayaran() {
                         <td className="p-3">
                           {new Date(item.tanggalpembayaran).toLocaleDateString("id-ID")}
                         </td>
+                        {/* FIX: Aksi lihat bukti pembayaran */}
+                        <td className="p-3 text-center">
+                          {item.bukti_pembayaran_url ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 gap-1.5"
+                              onClick={() => setBuktiPreviewUrl(item.bukti_pembayaran_url)}
+                            >
+                              <ImageIcon className="h-3.5 w-3.5" />
+                              Lihat
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">-</span>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -457,7 +468,7 @@ export default function RekapanPembayaran() {
                   <tr className="border-t-2 font-bold bg-muted/30">
                     <td colSpan={5} className="p-3 text-right">Total:</td>
                     <td className="p-3 text-right text-green-600">{convertIDR(totalNominal)}</td>
-                    <td colSpan={2} />
+                    <td colSpan={3} />
                   </tr>
                 </tfoot>
               </table>
@@ -465,6 +476,22 @@ export default function RekapanPembayaran() {
           )}
         </CardContent>
       </Card>
+
+      {/* ─── Lightbox bukti pembayaran ────────────────────────────────────── */}
+      <Dialog open={!!buktiPreviewUrl} onOpenChange={(o) => !o && setBuktiPreviewUrl(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Bukti Pembayaran</DialogTitle>
+          </DialogHeader>
+          {buktiPreviewUrl && (
+            <img
+              src={buktiPreviewUrl}
+              alt="Bukti pembayaran"
+              className="w-full rounded-lg border"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

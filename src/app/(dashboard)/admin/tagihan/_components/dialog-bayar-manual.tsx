@@ -2,12 +2,21 @@
 
 import { Dialog } from "@radix-ui/react-dialog";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { bayarTagihanManual } from "../actions";
+import { uploadFile } from "@/actions/storage-action";
 import { toast } from "sonner";
 import FormInput from "@/components/common/form-input";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   DialogClose,
   DialogContent,
@@ -17,7 +26,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Form } from "@/components/ui/form";
-import { Loader2, Banknote, AlertTriangle } from "lucide-react";
+import { Loader2, Banknote, AlertTriangle, Upload, X, ImageIcon } from "lucide-react";
 import { z } from "zod";
 import { convertIDR } from "@/lib/utils";
 
@@ -26,6 +35,11 @@ const schema = z.object({
 });
 
 type FormType = z.infer<typeof schema>;
+
+// Bucket Supabase Storage untuk bukti pembayaran. Bucket ini harus dibuat
+// dulu secara manual di Supabase Dashboard (Storage → New bucket → set
+// public), lihat catatan di README patch.
+const BUCKET_BUKTI_PEMBAYARAN = "bukti-pembayaran";
 
 export default function DialogBayarManual({
   refetch,
@@ -40,6 +54,31 @@ export default function DialogBayarManual({
 }) {
   const form = useForm<FormType>({ resolver: zodResolver(schema) });
   const [isPending, setIsPending] = useState(false);
+  const [tipePembayaran, setTipePembayaran] = useState<"cash" | "transfer">("cash");
+  const [buktiFile, setBuktiFile] = useState<File | null>(null);
+  const [buktiPreview, setBuktiPreview] = useState<string>("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Bukti pembayaran harus berupa gambar (jpg/png)");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Ukuran gambar maksimal 5MB");
+      return;
+    }
+    setBuktiFile(file);
+    setBuktiPreview(URL.createObjectURL(file));
+  };
+
+  const handleRemoveFile = () => {
+    setBuktiFile(null);
+    setBuktiPreview("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
 
   const onSubmit = form.handleSubmit(async (data) => {
     const jumlahBayar = parseFloat(data.jumlahbayar);
@@ -52,25 +91,49 @@ export default function DialogBayarManual({
 
     try {
       setIsPending(true);
+
+      // FIX: kalau ada bukti pembayaran, upload dulu ke Supabase Storage
+      // sebelum submit form — hasil URL-nya disertakan ke action.
+      let buktiUrl: string | null = null;
+      if (buktiFile) {
+        const uploadResult = await uploadFile(
+          BUCKET_BUKTI_PEMBAYARAN,
+          `tagihan-${currentData?.idtagihansiswa}`,
+          buktiFile
+        );
+        if (uploadResult.status === "error") {
+          toast.error("Gagal mengunggah bukti pembayaran", {
+            description: uploadResult.errors?._form?.[0],
+          });
+          setIsPending(false);
+          return;
+        }
+        buktiUrl = uploadResult.data?.url || null;
+      }
+
       const formData = new FormData();
       formData.append("idtagihansiswa", currentData?.idtagihansiswa?.toString() ?? "");
       formData.append("jumlahbayar", data.jumlahbayar);
-      
+      formData.append("tipepembayaran", tipePembayaran);
+      if (buktiUrl) formData.append("buktipembayaranurl", buktiUrl);
+
       const state = await bayarTagihanManual({}, formData);
-      
+
       if (state?.status === "error") {
         toast.error("Gagal Menyimpan Pembayaran", { description: state.errors?._form?.[0] });
       } else if (state?.status === "success") {
         const statusBaru = state.data?.statusbaru;
         const sisaBaru = state.data?.sisatagihan ?? 0;
-        
+
         if (statusBaru === "LUNAS") {
           toast.success("Pembayaran berhasil! Tagihan sudah LUNAS.");
         } else {
           toast.success(`Pembayaran berhasil! Sisa tagihan: ${convertIDR(sisaBaru)}`);
         }
-        
+
         form.reset();
+        setTipePembayaran("cash");
+        handleRemoveFile();
         handleChangeAction?.(false);
         refetch();
       }
@@ -84,7 +147,10 @@ export default function DialogBayarManual({
   useEffect(() => {
     if (currentData && open) {
       form.reset({ jumlahbayar: "" });
+      setTipePembayaran("cash");
+      handleRemoveFile();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentData, open]);
 
   const sisaTagihan = parseFloat(currentData?.sisa || currentData?.jumlahtagihan || "0");
@@ -99,13 +165,13 @@ export default function DialogBayarManual({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Banknote className="w-5 h-5 text-green-600" />
-              Bayar Tagihan (Cash/Manual)
+              Bayar Tagihan (Manual)
             </DialogTitle>
             <DialogDescription>
-              Input jumlah pembayaran yang diterima secara tunai
+              Input pembayaran yang diterima secara cash atau transfer manual
             </DialogDescription>
           </DialogHeader>
-          
+
           <form onSubmit={onSubmit} className="space-y-4">
             {/* Info tagihan */}
             <div className="p-4 bg-muted rounded-lg space-y-2 text-sm">
@@ -147,6 +213,21 @@ export default function DialogBayarManual({
               </div>
             </div>
 
+            {/* FIX: Tipe Pembayaran — cash / transfer */}
+            <div className="space-y-1.5">
+              <Label className="text-sm">Tipe Pembayaran</Label>
+              <Select
+                value={tipePembayaran}
+                onValueChange={(v) => setTipePembayaran(v as "cash" | "transfer")}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="transfer">Transfer Bank</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             <FormInput
               form={form}
               name="jumlahbayar"
@@ -154,6 +235,44 @@ export default function DialogBayarManual({
               placeholder="Contoh: 50000"
               type="number"
             />
+
+            {/* FIX: Upload Bukti Pembayaran */}
+            <div className="space-y-1.5">
+              <Label className="text-sm">Bukti Pembayaran (opsional)</Label>
+              {!buktiPreview ? (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full border-2 border-dashed rounded-lg p-4 flex flex-col items-center gap-1.5 text-muted-foreground hover:border-green-400 hover:text-green-600 transition-colors"
+                >
+                  <Upload className="w-5 h-5" />
+                  <span className="text-xs">Klik untuk unggah foto bukti transfer/cash</span>
+                  <span className="text-[10px]">JPG/PNG, maks 5MB</span>
+                </button>
+              ) : (
+                <div className="relative w-fit">
+                  <img
+                    src={buktiPreview}
+                    alt="Preview bukti pembayaran"
+                    className="h-32 rounded-lg border object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleRemoveFile}
+                    className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full p-1 hover:bg-red-700"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+            </div>
 
             {/* Preview sisa setelah bayar */}
             {jumlahBayarNum > 0 && (
@@ -180,8 +299,8 @@ export default function DialogBayarManual({
               <DialogClose asChild>
                 <Button variant="outline" disabled={isPending}>Batal</Button>
               </DialogClose>
-              <Button 
-                type="submit" 
+              <Button
+                type="submit"
                 className="bg-green-600 hover:bg-green-700"
                 disabled={isPending || jumlahBayarNum <= 0 || jumlahBayarNum > sisaTagihan}
               >

@@ -1,267 +1,160 @@
-// src/components/common/kwitansi-template.tsx
 "use client";
 
-import Image from "next/image";
-import { convertIDR } from "@/lib/utils";
-import { terbilangRupiah } from "@/lib/kwitansi-helper";
+export interface KwitansiData {
+  noKwitansi: string;
+  tanggalCetak: string;
+  jamCetak: string;
+  namaSiswa: string;
+  kelas: string;
+  namaWali: string;
+  namaTagihan: string;
+  periode: string;
+  jumlahDibayar: number;
+  totalTagihan: number;
+  sisaTagihan: number;
+  isLunas: boolean;
+  qrCodeDataUrl?: string;
+  tagihanLain?: Array<{
+    idtagihansiswa: number;
+    jumlahtagihan: string;
+    bulan: number;
+    tahun: number;
+    namatagihan: string;
+  }>;
+}
 
 const BULAN_NAMA = [
   "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
   "Juli", "Agustus", "September", "Oktober", "November", "Desember",
 ];
 
-export type KwitansiTagihanLain = {
-  idtagihansiswa: number;
-  jumlahtagihan: string | number;
-  bulan: number;
-  tahun: number;
-  namatagihan: string;
-};
+function formatRupiah(n: number) {
+  return new Intl.NumberFormat("id-ID").format(Math.max(0, Math.round(n)));
+}
 
-export type KwitansiData = {
-  noKwitansi: string;
-  tanggalCetak: string; // "16 Juni 2026"
-  jamCetak: string; // "15.13 WIB"
-  namaSiswa: string;
-  kelas: string;
-  namaWali: string;
-  namaTagihan: string;
-  periode: string; // "Mei 2026"
-  jumlahDibayar: number;
-  totalTagihan: number;
-  sisaTagihan: number;
-  isLunas: boolean;
-  qrCodeDataUrl: string; // hasil dari generateQrCodeDataUrl()
-  tagihanLain: KwitansiTagihanLain[];
-  namaBendahara?: string;
-};
+// Nama bendahara yang menandatangani kwitansi. FIX: gambar tanda tangan asli
+// sudah ditempel di public/tanda-tangan-bendahara.png (background sudah
+// dibuat transparan), diletakkan tepat di atas nama ini.
+const NAMA_BENDAHARA = "Sri Wahyuni";
 
-/**
- * Template kwitansi yang dipakai bersama oleh:
- * - Halaman /kwitansi/[id] (link yang dikirim via WhatsApp & jadi isi QR code)
- * - Tombol "Cetak Kwitansi" di Riwayat Pembayaran (react-to-print)
- *
- * Disatukan jadi satu komponen supaya formatnya selalu konsisten di semua
- * tempat — kalau mau ubah desain kwitansi, cukup ubah file ini saja.
- */
 export default function KwitansiTemplate({ data }: { data: KwitansiData }) {
-  const {
-    noKwitansi,
-    tanggalCetak,
-    jamCetak,
-    namaSiswa,
-    kelas,
-    namaWali,
-    namaTagihan,
-    periode,
-    jumlahDibayar,
-    totalTagihan,
-    sisaTagihan,
-    isLunas,
-    qrCodeDataUrl,
-    tagihanLain,
-    namaBendahara = "Sri Wahyuni",
-  } = data;
-
-  const totalTagihanLain = tagihanLain.reduce(
-    (sum, t) => sum + parseFloat(String(t.jumlahtagihan || "0")),
-    0
-  );
-
   return (
-    <div
-      className="bg-white text-black mx-auto"
-      style={{ width: "100%", maxWidth: 680, fontFamily: "Georgia, serif" }}
-    >
-      <div className="p-8 border border-gray-300">
-        {/* ── Header: logo kiri - nama sekolah - logo kanan ──────────────── */}
-        <div className="flex items-center justify-between gap-4 pb-4 mb-4 border-b-2 border-gray-800">
-          <div className="w-16 h-16 relative shrink-0">
-            <Image
-              src="/logo.jpg"
-              alt="Logo Sekolah"
-              fill
-              className="object-contain"
+    <div className="bg-white text-black" style={{ width: "210mm", minHeight: "148mm", padding: "12mm" }}>
+      {/* Header */}
+      <div className="flex items-center justify-between border-b-2 border-black pb-3 mb-4">
+        <div className="flex items-center gap-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.jpg" alt="Logo" className="h-14 w-14 object-contain" />
+          <div>
+            <p className="font-bold text-lg leading-tight">KB TK AISYIYAH BUSTANUL ATHFAL 1</p>
+            <p className="text-sm leading-tight">BUDURAN — SIDOARJO</p>
+          </div>
+        </div>
+        <div className="text-right">
+          <p className="font-bold text-xl uppercase tracking-wide">Kwitansi</p>
+          <p className="text-sm font-mono">No. {data.noKwitansi}</p>
+        </div>
+      </div>
+
+      {/* Info transaksi */}
+      <div className="grid grid-cols-2 gap-x-8 gap-y-1.5 text-sm mb-4">
+        <div className="flex justify-between border-b border-dotted border-gray-400 pb-1">
+          <span className="text-gray-600">Nama Siswa</span>
+          <span className="font-semibold">{data.namaSiswa}</span>
+        </div>
+        <div className="flex justify-between border-b border-dotted border-gray-400 pb-1">
+          <span className="text-gray-600">Kelas</span>
+          <span className="font-semibold">{data.kelas}</span>
+        </div>
+        <div className="flex justify-between border-b border-dotted border-gray-400 pb-1">
+          <span className="text-gray-600">Nama Wali</span>
+          <span className="font-semibold">{data.namaWali}</span>
+        </div>
+        <div className="flex justify-between border-b border-dotted border-gray-400 pb-1">
+          <span className="text-gray-600">Tanggal Bayar</span>
+          <span className="font-semibold">{data.tanggalCetak}, {data.jamCetak}</span>
+        </div>
+        <div className="flex justify-between border-b border-dotted border-gray-400 pb-1">
+          <span className="text-gray-600">Jenis Tagihan</span>
+          <span className="font-semibold">{data.namaTagihan}</span>
+        </div>
+        <div className="flex justify-between border-b border-dotted border-gray-400 pb-1">
+          <span className="text-gray-600">Periode</span>
+          <span className="font-semibold">{data.periode}</span>
+        </div>
+      </div>
+
+      {/* Rincian pembayaran */}
+      <table className="w-full text-sm border-collapse mb-4">
+        <thead>
+          <tr className="bg-gray-100">
+            <th className="border border-gray-300 p-2 text-left">Keterangan</th>
+            <th className="border border-gray-300 p-2 text-right">Nominal</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td className="border border-gray-300 p-2">Total Tagihan</td>
+            <td className="border border-gray-300 p-2 text-right">Rp{formatRupiah(data.totalTagihan)}</td>
+          </tr>
+          <tr>
+            <td className="border border-gray-300 p-2 font-semibold">Jumlah Dibayar (transaksi ini)</td>
+            <td className="border border-gray-300 p-2 text-right font-semibold">
+              Rp{formatRupiah(data.jumlahDibayar)}
+            </td>
+          </tr>
+          <tr>
+            <td className="border border-gray-300 p-2">Sisa Tagihan Setelah Ini</td>
+            <td className="border border-gray-300 p-2 text-right">
+              {data.isLunas ? (
+                <span className="text-green-700 font-bold">LUNAS</span>
+              ) : (
+                `Rp${formatRupiah(data.sisaTagihan)}`
+              )}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      {data.tagihanLain && data.tagihanLain.length > 0 && (
+        <div className="mb-4">
+          <p className="text-xs font-semibold text-gray-600 mb-1">
+            Catatan: Ananda masih memiliki tagihan lain yang belum lunas:
+          </p>
+          <ul className="text-xs text-gray-600 list-disc list-inside space-y-0.5">
+            {data.tagihanLain.slice(0, 5).map((t) => (
+              <li key={t.idtagihansiswa}>
+                {t.namatagihan} ({BULAN_NAMA[t.bulan]} {t.tahun}) — Rp{formatRupiah(parseFloat(t.jumlahtagihan))}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Footer: QR + Tanda tangan */}
+      <div className="flex justify-between items-end mt-8">
+        <div className="flex flex-col items-center">
+          {data.qrCodeDataUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={data.qrCodeDataUrl} alt="QR Kwitansi" className="w-20 h-20" />
+          )}
+          <p className="text-[10px] text-gray-500 mt-1">Scan untuk verifikasi</p>
+        </div>
+
+        <div className="text-center">
+          <p className="text-sm mb-1">Buduran, {data.tanggalCetak}</p>
+          <p className="text-sm mb-1">Bendahara,</p>
+          {/* FIX: tanda tangan asli (background sudah transparan), ditempel
+              tepat di atas nama bendahara — gantikan garis kosong lama. */}
+          <div className="h-20 w-36 flex items-end justify-center mx-auto -mb-1">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/tanda-tangan-bendahara.png"
+              alt={`Tanda tangan ${NAMA_BENDAHARA}`}
+              className="max-h-20 max-w-36 object-contain"
             />
           </div>
-
-          <div className="flex-1 text-center px-2">
-            <h1 className="text-lg font-bold uppercase tracking-wide leading-tight">
-              KB/TK Aisyiyah Bustanul Athfal 1 Buduran
-            </h1>
-            <p className="text-xs text-gray-600 mt-1">
-              Jl. Kavling Persada Asri C-37, Damarsi, Buduran, Sidoarjo
-            </p>
-          </div>
-
-          <div className="w-16 h-16 relative shrink-0">
-            <Image
-              src="/logopt.png"
-              alt="Logo Penyedia Sistem"
-              fill
-              className="object-contain"
-            />
-          </div>
-        </div>
-
-        {/* ── Judul ────────────────────────────────────────────────────── */}
-        <h2 className="text-center text-base font-bold uppercase tracking-widest mb-4">
-          Kwitansi Pembayaran
-        </h2>
-
-        {/* ── No. Kwitansi & Tanggal ───────────────────────────────────── */}
-        <table className="w-full text-sm mb-4">
-          <tbody>
-            <tr>
-              <td className="text-gray-600 w-32 py-0.5">No. Kwitansi</td>
-              <td className="py-0.5">: {noKwitansi}</td>
-            </tr>
-            <tr>
-              <td className="text-gray-600 py-0.5">Tanggal</td>
-              <td className="py-0.5">: {tanggalCetak}</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <hr className="border-gray-300 mb-4" />
-
-        {/* ── Data Siswa ───────────────────────────────────────────────── */}
-        <p className="font-bold text-xs uppercase text-gray-600 mb-2">
-          Data Siswa
-        </p>
-        <table className="w-full text-sm mb-4">
-          <tbody>
-            <tr>
-              <td className="text-gray-600 w-32 py-0.5">Nama Siswa</td>
-              <td className="py-0.5 font-medium">: {namaSiswa}</td>
-            </tr>
-            <tr>
-              <td className="text-gray-600 py-0.5">Kelas</td>
-              <td className="py-0.5">: {kelas}</td>
-            </tr>
-            <tr>
-              <td className="text-gray-600 py-0.5">Wali Murid</td>
-              <td className="py-0.5">: {namaWali}</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <hr className="border-gray-300 mb-4" />
-
-        {/* ── Rincian Pembayaran ───────────────────────────────────────── */}
-        <p className="font-bold text-xs uppercase text-gray-600 mb-2">
-          Rincian Pembayaran
-        </p>
-        <table className="w-full text-sm border-collapse mb-3">
-          <thead>
-            <tr className="bg-gray-100 border-y border-gray-400">
-              <th className="text-left py-2 px-2 font-semibold">Jenis Tagihan</th>
-              <th className="text-center py-2 px-2 font-semibold">Periode</th>
-              <th className="text-right py-2 px-2 font-semibold">Nominal</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr className="border-b border-gray-200">
-              <td className="py-2 px-2">{namaTagihan}</td>
-              <td className="py-2 px-2 text-center">{periode}</td>
-              <td className="py-2 px-2 text-right">{convertIDR(totalTagihan)}</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <table className="w-full text-sm mb-4">
-          <tbody>
-            <tr>
-              <td className="py-0.5 text-gray-600">Total Dibayar</td>
-              <td className="py-0.5 text-right font-bold text-green-700">
-                : {convertIDR(jumlahDibayar)}
-              </td>
-            </tr>
-            <tr>
-              <td className="py-0.5 text-gray-600">Sisa Tagihan</td>
-              <td
-                className={`py-0.5 text-right font-bold ${
-                  sisaTagihan > 0 ? "text-red-700" : "text-green-700"
-                }`}
-              >
-                : {convertIDR(Math.max(0, sisaTagihan))}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        <div
-          className={`border-2 rounded p-3 mb-4 text-center font-bold text-sm ${
-            isLunas
-              ? "border-green-500 bg-green-50 text-green-800"
-              : "border-amber-500 bg-amber-50 text-amber-800"
-          }`}
-        >
-          Status Pembayaran: {isLunas ? "✓ LUNAS" : "⚠ BELUM LUNAS"}
-          <p className="font-normal text-xs mt-1">
-            Alhamdulillah, pembayaran telah kami terima dan tercatat pada
-            sistem administrasi sekolah.
-          </p>
-        </div>
-
-        {/* ── Info Tagihan Lain yang Belum Dibayar ─────────────────────── */}
-        {tagihanLain.length > 0 && (
-          <>
-            <hr className="border-gray-300 mb-4" />
-            <p className="font-bold text-xs uppercase text-gray-700 mb-2">
-              Informasi Tagihan Lain Yang Belum Terbayar
-            </p>
-            <table className="w-full text-sm border-collapse mb-2">
-              <thead>
-                <tr className="bg-red-50 border-y border-red-200">
-                  <th className="text-left py-2 px-2 text-xs font-semibold text-gray-700">
-                    Jenis Tagihan
-                  </th>
-                  <th className="text-center py-2 px-2 text-xs font-semibold text-gray-700">
-                    Periode
-                  </th>
-                  <th className="text-right py-2 px-2 text-xs font-semibold text-gray-700">
-                    Nominal
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {tagihanLain.map((t) => (
-                  <tr key={t.idtagihansiswa} className="border-b border-gray-200">
-                    <td className="py-1.5 px-2">{t.namatagihan}</td>
-                    <td className="py-1.5 px-2 text-center">
-                      {BULAN_NAMA[t.bulan]} {t.tahun}
-                    </td>
-                    <td className="py-1.5 px-2 text-right text-gray-700 font-semibold">
-                      {convertIDR(parseFloat(String(t.jumlahtagihan || "0")))}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </>
-        )}
-<br />
-        {/* ── Tanda Tangan ─────────────────────────────────────────────── */}
-        <div className="flex justify-end mb-6">
-          <div className="text-center text-sm">
-            <p className="mb-12">Bendahara,</p>
-            <br className="w-32 h-0.5 bg-black block mx-auto mb-1" /> 
-            <p className="border-t border-black pt-1 px-6 font-medium">
-              ({namaBendahara})
-            </p>
-          </div>
-        </div>
-
-        {/* ── Footer ───────────────────────────────────────────────────── */}
-        <div className="text-center text-xs text-gray-400 border-t border-gray-300 pt-3">
-          <p>
-            Dokumen ini diterbitkan secara elektronik dan sah tanpa tanda
-            tangan basah.
-          </p>
-          <p className="mt-1">
-            Dicetak pada: {tanggalCetak} pukul {jamCetak}
-          </p>
+          <p className="font-semibold underline underline-offset-2">{NAMA_BENDAHARA}</p>
         </div>
       </div>
     </div>

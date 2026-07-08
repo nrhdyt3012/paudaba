@@ -46,7 +46,9 @@ async function getTagihanPermission(supabase: any, idTagihan: string) {
 
   const hasMidtransPayment = pembayaranList.some(
     (p: any) =>
-      p.statuspembayaran === "SUCCESS" && p.metodepembayaran !== "cash"
+      p.statuspembayaran === "SUCCESS" &&
+      p.metodepembayaran !== "cash" &&
+      p.metodepembayaran !== "transfer"
   );
 
   const nonSuccessIds = pembayaranList
@@ -60,8 +62,6 @@ async function getTagihanPermission(supabase: any, idTagihan: string) {
     tagihan,
     hasSuccessPayment,
     hasMidtransPayment,
-    // Cicilan cash tetap boleh dilanjutkan selama belum LUNAS dan belum ada
-    // pembayaran midtrans yang melunasinya.
     canBayarManual:
       !hasMidtransPayment && tagihan.statuspembayaran !== "LUNAS",
     canDelete: !hasSuccessPayment,
@@ -70,15 +70,28 @@ async function getTagihanPermission(supabase: any, idTagihan: string) {
   };
 }
 
-// ─── Bayar Manual (cash, boleh cicilan) ───────────────────────────────────────
+// ─── Bayar Manual (cash ATAU transfer manual, boleh cicilan) ─────────────────
+// FIX: sekarang menerima juga `tipepembayaran` ("cash" | "transfer") dan
+// `buktipembayaranurl` (link gambar bukti transfer/pembayaran yang sudah
+// diunggah ke Supabase Storage sebelum action ini dipanggil — lihat
+// dialog-bayar-manual.tsx untuk alur upload-nya).
 export async function bayarTagihanManual(prevState: any, formData: FormData) {
   const idTagihan = formData.get("idtagihansiswa") as string;
   const jumlahBayar = parseFloat(formData.get("jumlahbayar") as string);
+  const tipePembayaran = (formData.get("tipepembayaran") as string) || "cash";
+  const buktiPembayaranUrl = (formData.get("buktipembayaranurl") as string) || null;
 
   if (!idTagihan || !jumlahBayar || jumlahBayar <= 0) {
     return {
       status: "error",
       errors: { _form: ["Data pembayaran tidak valid"] },
+    };
+  }
+
+  if (tipePembayaran !== "cash" && tipePembayaran !== "transfer") {
+    return {
+      status: "error",
+      errors: { _form: ["Tipe pembayaran tidak valid"] },
     };
   }
 
@@ -94,7 +107,7 @@ export async function bayarTagihanManual(prevState: any, formData: FormData) {
       errors: {
         _form: [
           perm.hasMidtransPayment
-            ? "Tagihan sudah lunas via Midtrans, tidak dapat ditambah pembayaran cash"
+            ? "Tagihan sudah lunas via Midtrans, tidak dapat ditambah pembayaran manual"
             : "Tagihan sudah lunas",
         ],
       },
@@ -116,9 +129,6 @@ export async function bayarTagihanManual(prevState: any, formData: FormData) {
   const terbayarBaru = sudahBayar + jumlahBayar;
   const sisaSetelahIni = Math.max(0, totalTagihan - terbayarBaru);
 
-  // FIX poin 3: cicilan yang belum melunasi total HARUS berstatus
-  // "BELUM LUNAS", bukan tetap "BELUM BAYAR" (yang membuatnya seolah belum
-  // ada uang masuk sama sekali) dan bukan juga langsung "LUNAS".
   const statusBaru =
     terbayarBaru >= totalTagihan
       ? "LUNAS"
@@ -142,9 +152,6 @@ export async function bayarTagihanManual(prevState: any, formData: FormData) {
     };
   }
 
-  // FIX poin 8: simpan snapshot sisa SAAT transaksi ini terjadi, immutable,
-  // supaya Riwayat Pembayaran & kwitansi tidak salah tampil kalau tagihan
-  // sudah lunas di kemudian hari.
   const { data: pembayaranData, error: insertError } = await supabase
     .from("pembayaran")
     .insert({
@@ -152,9 +159,10 @@ export async function bayarTagihanManual(prevState: any, formData: FormData) {
       idsiswa: tagihan.idsiswa,
       jumlahdibayar: jumlahBayar,
       tanggalpembayaran: new Date().toISOString(),
-      metodepembayaran: "cash",
+      metodepembayaran: tipePembayaran, // "cash" atau "transfer"
       statuspembayaran: "SUCCESS",
       sisa_setelah_transaksi_ini: sisaSetelahIni,
+      bukti_pembayaran_url: buktiPembayaranUrl,
     })
     .select("idpembayaran")
     .single();
@@ -170,17 +178,16 @@ export async function bayarTagihanManual(prevState: any, formData: FormData) {
     supabase,
     namamenu: "Tagihan Siswa",
     jenisaksi: "UBAH",
-    deskripsi: `Mencatat pembayaran cash sebesar Rp${jumlahBayar.toLocaleString(
+    deskripsi: `Mencatat pembayaran ${tipePembayaran} sebesar Rp${jumlahBayar.toLocaleString(
       "id-ID"
     )} untuk ${namaSiswa} - ${namaTagihan} (${tagihan.bulan}/${tagihan.tahun}) — status: ${statusBaru}`,
   });
 
   revalidatePath("/admin/tagihan");
+  revalidatePath("/admin/rekapan-pembayaran");
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
-  // FIX poin 6: kirim status LUNAS/BELUM LUNAS yang sebenarnya ke endpoint
-  // notifikasi, supaya pesan WA tidak selalu bilang "LUNAS" untuk cicilan.
   if (pembayaranData?.idpembayaran) {
     if (process.env.FONNTE_API_KEY) {
       try {

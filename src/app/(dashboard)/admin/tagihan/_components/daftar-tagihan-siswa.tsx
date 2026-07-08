@@ -31,6 +31,11 @@ import { useRouter } from "next/navigation";
 import DialogDeleteTagihanSiswa from "./dialog-delete-tagihan-siswa";
 import DialogBayarManual from "./dialog-bayar-manual";
 
+const BULAN_NAMA = [
+  "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+  "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+];
+
 const KELAS_OPTIONS = [
   { value: "semua", label: "Semua Kelas" },
   { value: "KB", label: "KB" },
@@ -90,8 +95,11 @@ export default function DaftarTagihanSiswa() {
       let query = supabase
         .from("tagihan_siswa")
         .select(
+          // Kolom "Periode Ditagihkan" diambil dari `bulan`/`tahun` yang
+          // sudah otomatis ikut ter-select lewat `*` (kolom tagihan_siswa
+          // itu sendiri) — tidak butuh join tambahan.
           `*, siswa!idsiswa(id, namasiswa, kelas),
-          master_tagihan!idmastertagihan(id_mastertagihan, namatagihan, jenjang),
+          master_tagihan!idmastertagihan(id_mastertagihan, namatagihan, jenjang, jenistagihan),
           pembayaran(idpembayaran, statuspembayaran, metodepembayaran)`,
           { count: "exact" }
         );
@@ -172,8 +180,8 @@ export default function DaftarTagihanSiswa() {
             "px-2 py-0.5 rounded-full text-xs font-medium w-fit",
             item.statuspembayaran === "LUNAS"
               ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100"
-              : item.statuspembayaran === "KADALUARSA"
-              ? "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+              : item.statuspembayaran === "BELUM LUNAS"
+              ? "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100"
               : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100"
           )}>
             {item.statuspembayaran}
@@ -188,6 +196,16 @@ export default function DaftarTagihanSiswa() {
         new Date(item.createdat).toLocaleDateString("id-ID", {
           day: "numeric", month: "short", year: "numeric",
         }),
+        // FIX (klarifikasi): kolom baru "Periode Ditagihkan" — bukan
+        // "Jenis". Isinya bulan/tahun yang dipilih admin waktu menerbitkan
+        // tagihan ini (langkah setelah memilih Master Tagihan di form Buat
+        // Tagihan), ditampilkan sebagai "Juli 2026" dst.
+        <span
+          key={`periode-${item.idtagihansiswa}`}
+          className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-100 whitespace-nowrap"
+        >
+          {BULAN_NAMA[item.bulan] || item.bulan} {item.tahun}
+        </span>,
         <DropdownAction
           key={`act-${item.idtagihansiswa}`}
           menu={[
@@ -195,7 +213,7 @@ export default function DaftarTagihanSiswa() {
               label: (
                 <span className="flex items-center gap-2">
                   <Banknote className={cn("w-4 h-4", perms.canBayarManual ? "text-green-600" : "text-gray-400")} />
-                  {perms.canBayarManual ? "Bayar Manual (Cash)" : "Bayar Manual (Terkunci)"}
+                  {perms.canBayarManual ? "Bayar Manual" : "Bayar Manual (Terkunci)"}
                 </span>
               ),
               action: () => {
@@ -258,7 +276,6 @@ export default function DaftarTagihanSiswa() {
             </SelectContent>
           </Select>
 
-          {/* ← Navigate ke halaman penuh, bukan buka dialog */}
           <Button
             className="bg-green-600 hover:bg-green-700"
             onClick={() => router.push("/admin/tagihan/buat")}
@@ -300,7 +317,7 @@ export default function DaftarTagihanSiswa() {
       </div>
 
       <DataTable
-        header={["No", "ID", "Nama Siswa", "Tagihan", "Nominal", "Sisa Tagihan", "Status", "Tanggal", "Aksi"]}
+        header={["No", "ID", "Nama Siswa", "Tagihan", "Nominal", "Sisa Tagihan", "Status", "Tanggal", "Periode Ditagihkan", "Aksi"]}
         data={filteredData}
         isLoading={isLoading}
         totalPages={tagihanList?.count ? Math.ceil(tagihanList.count / currentLimit) : 0}
