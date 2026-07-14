@@ -93,18 +93,32 @@ export default function KwitansiTemplate({ data }: { data: KwitansiData }) {
           </tr>
         </thead>
         <tbody>
+          {/* Baris 1: nominal awal tagihan secara keseluruhan (utuh, belum
+              dikurangi apa pun). */}
           <tr>
-            <td className="border border-gray-300 p-2">Total Tagihan</td>
+            <td className="border border-gray-300 p-2">Total Tagihan Keseluruhan</td>
             <td className="border border-gray-300 p-2 text-right">Rp{formatRupiah(data.totalTagihan)}</td>
           </tr>
+          {/* Baris 2: akumulasi pembayaran SEBELUM transaksi ini terjadi
+              (tidak termasuk nominal transaksi ini) — supaya alurnya jelas:
+              Total Tagihan − Sudah Dibayar (sebelumnya) − Dibayar (transaksi
+              ini) = Sisa. */}
           <tr>
-            <td className="border border-gray-300 p-2 font-semibold">Jumlah Dibayar (transaksi ini)</td>
+            <td className="border border-gray-300 p-2">Jumlah Sudah Dibayar (sebelum transaksi ini)</td>
+            <td className="border border-gray-300 p-2 text-right">
+              Rp{formatRupiah(data.totalTagihan - data.sisaTagihan - data.jumlahDibayar)}
+            </td>
+          </tr>
+          {/* Baris 3: nominal yang dibayar KHUSUS pada transaksi ini saja. */}
+          <tr>
+            <td className="border border-gray-300 p-2 font-semibold">Dibayar pada Transaksi Ini</td>
             <td className="border border-gray-300 p-2 text-right font-semibold">
               Rp{formatRupiah(data.jumlahDibayar)}
             </td>
           </tr>
+          {/* Baris 4: sisa setelah transaksi ini — LUNAS kalau sisa = 0. */}
           <tr>
-            <td className="border border-gray-300 p-2">Sisa Tagihan Setelah Ini</td>
+            <td className="border border-gray-300 p-2">Sisa Tagihan</td>
             <td className="border border-gray-300 p-2 text-right">
               {data.isLunas ? (
                 <span className="text-green-700 font-bold">LUNAS</span>
