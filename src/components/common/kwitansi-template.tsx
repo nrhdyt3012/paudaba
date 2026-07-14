@@ -132,7 +132,7 @@ export default function KwitansiTemplate({ data }: { data: KwitansiData }) {
       )}
 
       {/* Footer: QR + Tanda tangan */}
-      <div className="flex justify-between items-end mt-8">
+      <div className="flex justify-end items-end mt-8">
         {/* <div className="flex flex-col items-center">
           {data.qrCodeDataUrl && (
             // eslint-disable-next-line @next/next/no-img-element
