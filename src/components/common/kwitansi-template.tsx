@@ -133,13 +133,13 @@ export default function KwitansiTemplate({ data }: { data: KwitansiData }) {
 
       {/* Footer: QR + Tanda tangan */}
       <div className="flex justify-between items-end mt-8">
-        <div className="flex flex-col items-center">
+        {/* <div className="flex flex-col items-center">
           {data.qrCodeDataUrl && (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={data.qrCodeDataUrl} alt="QR Kwitansi" className="w-20 h-20" />
           )}
           <p className="text-[10px] text-gray-500 mt-1">Scan untuk verifikasi</p>
-        </div>
+        </div> */}
 
         <div className="text-center">
           <p className="text-sm mb-1">Buduran, {data.tanggalCetak}</p>
