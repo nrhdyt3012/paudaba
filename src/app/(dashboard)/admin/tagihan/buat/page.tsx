@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/select";
 import {
   Loader2, Search, Check, X, Info,
-  ArrowLeft, Users, FileText, ChevronRight, Pencil,
+  ArrowLeft, Users, FileText, ChevronRight, ChevronsUpDown, Pencil,
 } from "lucide-react";
 import { convertIDR } from "@/lib/utils";
 import { createTagihanBatch } from "../actions";
@@ -116,11 +116,15 @@ export default function BuatTagihanPage() {
     (m: any) => m.id_mastertagihan?.toString() === selectedMaster
   );
 
-  // Hasil pencarian — hanya tampil jika ada teks pencarian
+  // FIX: dulu hasil pencarian cuma tampil kalau ada teks yang diketik
+  // (searchMaster.trim() harus tidak kosong). Sekarang begitu dropdown
+  // dibuka (klik/fokus ke input) langsung tampil SEMUA master tagihan;
+  // mengetik tinggal mempersempit (filter) daftar yang sedang tampil.
   const searchResults = useMemo(() => {
-    if (!searchMaster.trim()) return [];
+    const list = masterList || [];
+    if (!searchMaster.trim()) return list;
     const q = searchMaster.toLowerCase();
-    return (masterList || []).filter((m: any) =>
+    return list.filter((m: any) =>
       m.namatagihan?.toLowerCase().includes(q) || m.jenjang?.toLowerCase().includes(q)
     );
   }, [masterList, searchMaster]);
@@ -249,7 +253,7 @@ export default function BuatTagihanPage() {
       </div>
 
       {/* ════════════════════════════════════════════════════════════════════
-          STEP 1 — Master Tagihan (combobox search)
+          STEP 1 — Master Tagihan (dropdown: klik → tampil semua, ketik → filter)
       ════════════════════════════════════════════════════════════════════ */}
       <Card className="gap-3">
         <CardHeader className="pb-1">
@@ -259,35 +263,45 @@ export default function BuatTagihanPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {/* Jika BELUM dipilih: tampilkan search box */}
+          {/* Jika BELUM dipilih: tampilkan dropdown/search box */}
           {!selectedMaster ? (
             <div className="relative" ref={dropdownRef}>
               <div className="relative">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
                   ref={searchRef}
-                  placeholder="Ketik untuk mencari tagihan..."
+                  placeholder="Klik untuk lihat semua, atau ketik untuk mencari..."
                   value={searchMaster}
                   onChange={(e) => {
                     setSearchMaster(e.target.value);
                     setShowDropdown(true);
                   }}
-                  onFocus={() => { if (searchMaster) setShowDropdown(true); }}
-                  className="pl-9"
+                  // FIX: dulu dropdown cuma kebuka kalau sudah ada teks
+                  // (`if (searchMaster) setShowDropdown(true)`), sekarang
+                  // klik/fokus SELALU membuka dropdown biar semua master
+                  // tagihan langsung kelihatan tanpa perlu ngetik dulu.
+                  onFocus={() => setShowDropdown(true)}
+                  onClick={() => setShowDropdown(true)}
+                  className="pl-9 pr-9"
                   autoFocus
                 />
-                {searchMaster && (
+                {searchMaster ? (
                   <button
-                    onClick={() => { setSearchMaster(""); setShowDropdown(false); }}
+                    onClick={() => { setSearchMaster(""); searchRef.current?.focus(); }}
                     className="absolute right-3 top-2.5 text-muted-foreground hover:text-foreground"
                   >
                     <X className="h-4 w-4" />
                   </button>
+                ) : (
+                  <ChevronsUpDown
+                    className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none"
+                  />
                 )}
               </div>
 
-              {/* Dropdown hasil pencarian */}
-              {showDropdown && searchMaster && (
+              {/* Dropdown — FIX: sekarang tampil begitu dibuka (showDropdown
+                  saja), tidak lagi mensyaratkan searchMaster harus terisi. */}
+              {showDropdown && (
                 <div className="absolute z-50 w-full mt-1 bg-background border rounded-lg shadow-lg overflow-hidden">
                   {loadingMaster ? (
                     <div className="flex justify-center py-6">
@@ -296,7 +310,9 @@ export default function BuatTagihanPage() {
                   ) : searchResults.length === 0 ? (
                     <div className="py-6 px-4 text-center space-y-1.5">
                       <p className="text-sm font-medium text-muted-foreground">
-                        Tagihan &quot;{searchMaster}&quot; tidak ditemukan
+                        {searchMaster
+                          ? `Tagihan "${searchMaster}" tidak ditemukan`
+                          : "Belum ada master tagihan"}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         Coba kata kunci lain, atau buat di menu{" "}
@@ -328,15 +344,15 @@ export default function BuatTagihanPage() {
                     </div>
                   )}
                   <div className="px-4 py-2 border-t text-xs text-muted-foreground bg-muted/30">
-                    {searchResults.length} hasil ditemukan
+                    {searchResults.length} dari {masterList?.length || 0} master tagihan
                   </div>
                 </div>
               )}
 
-              {/* Hint awal sebelum mengetik */}
-              {!searchMaster && (
+              {/* Hint statis (selalu tampil, tidak lagi bersyarat) */}
+              {!showDropdown && (
                 <p className="text-xs text-muted-foreground mt-2">
-                  Ketik nama tagihan atau jenjang untuk mencari dari {masterList?.length || 0} master tagihan yang tersedia.
+                  Klik kotak di atas untuk melihat semua master tagihan, atau langsung ketik untuk mencari.
                 </p>
               )}
             </div>
@@ -557,7 +573,7 @@ export default function BuatTagihanPage() {
           <div>
             <p className="text-sm font-medium text-muted-foreground">Belum ada tagihan dipilih</p>
             <p className="text-xs text-muted-foreground mt-1">
-              Ketik nama tagihan di atas untuk mencari dan memilih master tagihan
+              Klik kotak pencarian di atas untuk melihat & memilih master tagihan
             </p>
           </div>
         </div>

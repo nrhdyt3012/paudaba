@@ -51,14 +51,35 @@ const STATUS_OPTIONS = [
 
 function getTagihanPermissions(item: any) {
   const pembayaran: any[] = item.pembayaran ?? [];
+  // FIX: "transfer" itu pembayaran manual (sama seperti "cash"), BUKAN
+  // via Midtrans — sebelumnya cuma "cash" yang dikecualikan, jadi
+  // pembayaran "transfer" (walau baru cicilan/parsial) ikut ke-anggap
+  // "via Midtrans" dan mengunci tagihan padahal belum lunas sama sekali.
+  // Disamakan dengan logic yang sama di actions.ts (getTagihanPermission).
   const hasMidtrans = pembayaran.some(
-    (p) => p.statuspembayaran === "SUCCESS" && p.metodepembayaran !== "cash"
+    (p) =>
+      p.statuspembayaran === "SUCCESS" &&
+      p.metodepembayaran !== "cash" &&
+      p.metodepembayaran !== "transfer"
   );
   const hasAnySuccess = pembayaran.some((p) => p.statuspembayaran === "SUCCESS");
+
+  // FIX: label "via ..." sekarang mengikuti metode transaksi SUCCESS yang
+  // sebenarnya (cash/transfer/midtrans), bukan cuma tebakan biner cash-vs-
+  // midtrans seperti sebelumnya (yang bikin transfer ke-label "via Cash").
+  const successPembayaran = pembayaran.find((p) => p.statuspembayaran === "SUCCESS");
+  const metodeLabel =
+    successPembayaran?.metodepembayaran === "transfer"
+      ? "via Transfer"
+      : successPembayaran?.metodepembayaran === "cash"
+      ? "via Cash"
+      : "via Midtrans";
+
   return {
     canBayarManual: !hasMidtrans && item.statuspembayaran !== "LUNAS",
     canDelete: !hasAnySuccess,
     hasMidtrans,
+    metodeLabel,
   };
 }
 
@@ -189,7 +210,7 @@ export default function DaftarTagihanSiswa() {
           {!perms.canDelete && (
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
               <Lock className="w-3 h-3" />
-              {perms.hasMidtrans ? "via Midtrans" : "via Cash"}
+              {perms.metodeLabel}
             </span>
           )}
         </div>,
