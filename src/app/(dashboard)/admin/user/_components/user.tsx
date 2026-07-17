@@ -91,6 +91,13 @@ export default function UserManagement() {
       // No WA
       item.nowa || "-",
 
+      // FIX: kolom Alamat baru — supaya konsisten, sekarang juga tampil
+      // di tabel Data Siswa (sebelumnya cuma bisa diisi lewat form, tidak
+      // kelihatan di listnya).
+      <span key={`alamat-${item.id}`} className="text-sm max-w-[200px] truncate block" title={item.alamat || "-"}>
+        {item.alamat || "-"}
+      </span>,
+
       // Kelas
       <span
         key={`kelas-${item.id}`}

@@ -83,8 +83,14 @@ export default function DataTable({
           </TableBody>
         </Table>
       </Card>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      {/* FIX: dulu "Limit" di kiri dan pagination di kanan dalam satu row
+          `justify-between` — karena div pagination tidak melebar penuh,
+          pagination jadi nempel ke kanan/tengah-kanan, bukan benar-benar
+          di tengah. Sekarang pakai grid 3 kolom: kolom tengah SELALU di
+          tengah dari lebar penuh baris, terlepas dari lebar kontrol Limit
+          di kiri. */}
+      <div className="grid grid-cols-3 items-center gap-4">
+        <div className="flex items-center gap-2 justify-self-start">
           <Label>Limit</Label>
           <Select
             value={currentLimit.toString()}
@@ -105,15 +111,16 @@ export default function DataTable({
             </SelectContent>
           </Select>
         </div>
-        {totalPages > 1 && (
-          <div className="flex justify-end">
+        <div className="justify-self-center">
+          {totalPages > 1 && (
             <PaginationDataTable
               currentPage={currentPage}
               onChangePage={onChangePage}
               totalPages={totalPages}
             />
-          </div>
-        )}
+          )}
+        </div>
+        <div />
       </div>
     </div>
   );

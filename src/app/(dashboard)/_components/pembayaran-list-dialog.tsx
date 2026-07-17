@@ -190,14 +190,13 @@ export default function PembayaranListDialog({
         </div>
 
         {filtered.length > 0 && (
-          <div className="px-8 py-4 border-t shrink-0 grid grid-cols-3 items-center bg-muted/30">
-            <span />
+          <div className="px-8 py-4 border-t shrink-0 flex flex-col items-center gap-2 bg-muted/30">
             <span className="text-sm text-muted-foreground text-center">
               Menampilkan {(currentPage - 1) * ITEMS_PER_PAGE + 1}–
               {Math.min(currentPage * ITEMS_PER_PAGE, filtered.length)} dari {filtered.length} transaksi
             </span>
-            {totalPages > 1 ? (
-              <div className="flex items-center gap-1 justify-self-end">
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1">
                 <Button
                   variant="outline"
                   size="sm"
@@ -218,8 +217,6 @@ export default function PembayaranListDialog({
                   ›
                 </Button>
               </div>
-            ) : (
-              <span />
             )}
           </div>
         )}

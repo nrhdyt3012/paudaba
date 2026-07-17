@@ -76,6 +76,7 @@ export default function DialogUpdateUser({
       form.setValue("no_wa", currentData.noWa || currentData.nowa || "");
       form.setValue("tempat_lahir", currentData.tempatLahir || currentData.tempatlahir || "");
       form.setValue("tanggal_lahir", currentData.tanggalLahir || currentData.tanggallahir || "");
+      form.setValue("alamat", currentData.alamat || "");
       form.setValue("role", "siswa");
 
       // ← Tipe SPP — pre-fill dari data siswa

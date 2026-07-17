@@ -19,6 +19,8 @@ export const createUserSchema = z.object({
   email_wali: z.string().email("Format email wali tidak valid").optional().or(z.literal("")),
   tempat_lahir: z.string().optional(),
   tanggal_lahir: z.string().optional(),
+  // FIX: field alamat baru (opsional)
+  alamat: z.string().optional(),
   // ← Baru: tipe SPP siswa (reguler/subsidi), default reguler
   tipe_spp: z.enum(["reguler", "subsidi"]).default("reguler"),
   role: z.string().default("siswa"),
@@ -35,11 +37,19 @@ export const updateUserSchema = z.object({
   email_wali: z.string().email("Format email wali tidak valid").optional().or(z.literal("")),
   tempat_lahir: z.string().optional(),
   tanggal_lahir: z.string().optional(),
+  // FIX: field alamat baru (opsional)
+  alamat: z.string().optional(),
   // ← Baru
   tipe_spp: z.enum(["reguler", "subsidi"]).default("reguler"),
   role: z.string().default("siswa"),
 });
 
 export type LoginForm = z.infer<typeof loginSchemaForm>;
-export type CreateUserForm = z.infer<typeof createUserSchema>;
-export type UpdateUserForm = z.infer<typeof updateUserSchema>;
+// FIX: pakai z.input (bukan z.infer/z.output) — field yang punya .default()
+// seperti `tipe_spp` dan `role` jadi tetap OPSIONAL di tipe form, sesuai
+// yang diharapkan react-hook-form's zodResolver (yang mem-validasi input
+// SEBELUM default diterapkan). Kalau pakai z.infer/z.output, field itu
+// jadi wajib-ada di tipe form padahal resolver mengizinkannya kosong —
+// itu penyebab error TS "Resolver<...> is not assignable to..." kemarin.
+export type CreateUserForm = z.input<typeof createUserSchema>;
+export type UpdateUserForm = z.input<typeof updateUserSchema>;

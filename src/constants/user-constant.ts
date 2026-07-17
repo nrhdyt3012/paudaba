@@ -9,6 +9,7 @@ export const HEADER_TABLE_USER = [
   "Tanggal Lahir",
   "Nama Wali",
   "No WA Wali",
+  "Alamat",
   "Kelas",
   "Angkatan",
   "Tipe SPP",

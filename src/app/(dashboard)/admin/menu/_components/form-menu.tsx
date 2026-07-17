@@ -193,8 +193,8 @@ export default function FormMenu({
               form={form}
               name="nominal"
               label="Nominal (Rp)"
-              placeholder="Contoh: 150000"
-              type="number"
+              placeholder="Contoh: 150.000"
+              type="currency"
             />
 
             {/* ─── Field 5: Keterangan (Opsional) ─── */}

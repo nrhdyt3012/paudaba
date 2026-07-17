@@ -21,6 +21,7 @@ export async function createUser(prevState: AuthFormState, formData: FormData) {
     email_wali: formData.get("email_wali") || undefined,
     tempat_lahir: formData.get("tempat_lahir"),
     tanggal_lahir: formData.get("tanggal_lahir"),
+    alamat: formData.get("alamat") || undefined,
     tipe_spp: formData.get("tipe_spp") || "reguler",
     role: formData.get("role") || "siswa",
   });
@@ -28,11 +29,14 @@ export async function createUser(prevState: AuthFormState, formData: FormData) {
   if (!validatedFields.success) {
     const fieldErrors = validatedFields.error.flatten().fieldErrors;
     console.error("[createUser] Validation error:", fieldErrors);
+    const errorMessages = Object.entries(fieldErrors)
+      .map(([field, msgs]) => `${field}: ${(msgs as string[]).join(", ")}`)
+      .join(" | ");
     return {
       status: "error",
       errors: {
         ...fieldErrors,
-        _form: [] as string[],
+        _form: [errorMessages || "Validasi form gagal"],
       },
     };
   }
@@ -69,6 +73,7 @@ export async function createUser(prevState: AuthFormState, formData: FormData) {
       nowa: validatedFields.data.no_wa,
       tempatlahir: validatedFields.data.tempat_lahir || null,
       tanggallahir: validatedFields.data.tanggal_lahir || null,
+      alamat: validatedFields.data.alamat || null,
       tipe_spp: validatedFields.data.tipe_spp || "reguler",
       status: "aktif",
     });
@@ -115,6 +120,7 @@ export async function updateUser(prevState: AuthFormState, formData: FormData) {
     email_wali: formData.get("email_wali") || undefined,
     tempat_lahir: formData.get("tempat_lahir"),
     tanggal_lahir: formData.get("tanggal_lahir"),
+    alamat: formData.get("alamat") || undefined,
     tipe_spp: formData.get("tipe_spp") || "reguler",
     role: formData.get("role") || "siswa",
   });
@@ -156,6 +162,7 @@ export async function updateUser(prevState: AuthFormState, formData: FormData) {
       nowa: validatedFields.data.no_wa,
       tempatlahir: validatedFields.data.tempat_lahir || null,
       tanggallahir: validatedFields.data.tanggal_lahir || null,
+      alamat: validatedFields.data.alamat || null,
       tipe_spp: validatedFields.data.tipe_spp || "reguler",
       updatedat: new Date().toISOString(),
     })

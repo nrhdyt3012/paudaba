@@ -1,217 +1,281 @@
-// src/app/(dashboard)/superadmin/bendahara/actions.ts
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { writeChangelog } from "@/lib/changelog";
 import { revalidatePath } from "next/cache";
-import { cookies } from "next/headers";
+import { z } from "zod";
 
-// ─── Helper: ambil profil superadmin dari cookie ──────────────────────────────
-async function getSuperadminProfile() {
-  const cookiesStore = await cookies();
-  const raw = cookiesStore.get("user_profile")?.value;
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
+// ════════════════════════════════════════════════════════════════════════
+// FIX (Kelola Akun): halaman ini sekarang mengelola 2 jenis akun sekaligus
+// — Wali Siswa (baris di tabel `siswa`) dan Bendahara (baris di tabel
+// `admin`). Keduanya sama-sama akun Supabase Auth, jadi update email &
+// reset password memakai `supabase.auth.admin.updateUserById`, sama
+// seperti pola yang sudah ada sebelumnya di halaman "Kelola Bendahara".
+//
+// PENTING soal PASSWORD: Supabase Auth (seperti semua sistem auth yang
+// benar) TIDAK PERNAH menyimpan password asli — hanya hash satu-arah
+// (bcrypt) yang tidak bisa dibalik jadi teks asli. Jadi password yang
+// SUDAH ADA tidak mungkin "dilihat" oleh siapa pun, termasuk superadmin.
+// Yang bisa dilakukan cuma RESET (set password baru), bukan lihat yang
+// lama. Kolom "Password" di tabel & dialog edit dibuat mengikuti batasan
+// ini — lihat komentar di komponen bendahara.tsx.
+// ════════════════════════════════════════════════════════════════════════
 
-// ─── Helper: tulis changelog ──────────────────────────────────────────────────
-async function writeChangelog(
-  supabase: any,
-  params: {
-    idsuperadmin: string;
-    namaaktor: string;
-    namamenu: string;
-    jenisaksi: "TAMBAH" | "UBAH" | "HAPUS";
-    deskripsi: string;
-  }
-) {
-  const { error } = await supabase.from("changelog").insert({
-    idsuperadmin: params.idsuperadmin,
-    namaaktor: params.namaaktor,
-    namamenu: params.namamenu,
-    jenisaksi: params.jenisaksi,
-    deskripsi: params.deskripsi,
+const updateAkunWaliSchema = z.object({
+  id: z.string().min(1),
+  nama_wali: z.string().min(1, "Nama wali wajib diisi"),
+  email: z.string().email("Format email tidak valid"),
+  no_wa: z.string().min(1, "Nomor WhatsApp wajib diisi"),
+  new_password: z
+    .string()
+    .optional()
+    .refine((v) => !v || v.length >= 6, "Password baru minimal 6 karakter"),
+});
+
+const updateAkunBendaharaSchema = z.object({
+  id: z.string().min(1),
+  nama: z.string().min(1, "Nama wajib diisi"),
+  email: z.string().email("Format email tidak valid"),
+  no_hp: z.string().min(1, "Nomor telepon wajib diisi"),
+  new_password: z
+    .string()
+    .optional()
+    .refine((v) => !v || v.length >= 6, "Password baru minimal 6 karakter"),
+});
+
+// ─── Update akun Wali Siswa ────────────────────────────────────────────────
+export async function updateAkunWali(prevState: any, formData: FormData) {
+  const parsed = updateAkunWaliSchema.safeParse({
+    id: formData.get("id"),
+    nama_wali: formData.get("nama_wali"),
+    email: formData.get("email"),
+    no_wa: formData.get("no_wa"),
+    new_password: formData.get("new_password") || undefined,
   });
-  if (error) {
-    console.error("[changelog] Gagal menulis changelog:", error.message);
-  }
-}
 
-// ─── Buat akun bendahara baru ─────────────────────────────────────────────────
-export async function createBendahara(prevState: any, formData: FormData) {
-  const email = formData.get("email") as string;
-  const password = formData.get("password") as string;
-  const nama = formData.get("nama") as string;
-  const nohp = formData.get("nohp") as string | null;
-  const jeniskelamin = formData.get("jeniskelamin") as string | null;
-
-  if (!email || !password || !nama) {
+  if (!parsed.success) {
+    const fieldErrors = parsed.error.flatten().fieldErrors;
+    const errorMessages = Object.entries(fieldErrors)
+      .map(([field, msgs]) => `${field}: ${(msgs as string[]).join(", ")}`)
+      .join(" | ");
     return {
       status: "error",
-      errors: { _form: ["Email, password, dan nama wajib diisi"] },
-    };
-  }
-  if (password.length < 6) {
-    return {
-      status: "error",
-      errors: { _form: ["Password minimal 6 karakter"] },
+      errors: { ...fieldErrors, _form: [errorMessages || "Validasi form gagal"] },
     };
   }
 
+  const { id, nama_wali, email, no_wa, new_password } = parsed.data;
   const supabase = await createClient({ isAdmin: true });
-  const profile = await getSuperadminProfile();
 
-  // Buat user di Supabase Auth
-  const { data: authData, error: authError } =
-    await supabase.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: { role: "admin", nama },
-    });
+  // Update email/password di Supabase Auth kalau ada perubahan
+  const authUpdate: { email?: string; password?: string } = {};
+  authUpdate.email = email;
+  if (new_password) authUpdate.password = new_password;
 
+  const { error: authError } = await supabase.auth.admin.updateUserById(id, authUpdate);
   if (authError) {
     return {
       status: "error",
-      errors: { _form: [authError.message] },
+      errors: { _form: [`Gagal update akun: ${authError.message}`] },
     };
   }
 
-  // Insert ke tabel admin
-  const { error: insertError } = await supabase.from("admin").insert({
-    id: authData.user.id,
-    email,
-    nama,
-    nohp: nohp || null,
-    jeniskelamin: jeniskelamin || null,
-  });
-
-  if (insertError) {
-    // Rollback: hapus user auth yang baru dibuat
-    await supabase.auth.admin.deleteUser(authData.user.id);
-    return {
-      status: "error",
-      errors: { _form: [`Gagal menyimpan data bendahara: ${insertError.message}`] },
-    };
-  }
-
-  // Tulis changelog
-  if (profile) {
-    await writeChangelog(supabase, {
-      idsuperadmin: profile.id,
-      namaaktor: profile.name || "Superadmin",
-      namamenu: "Kelola Bendahara",
-      jenisaksi: "TAMBAH",
-      deskripsi: `Menambahkan bendahara baru: ${nama} (${email})`,
-    });
-  }
-
-  revalidatePath("/superadmin/bendahara");
-  return { status: "success" };
-}
-
-// ─── Update data bendahara ────────────────────────────────────────────────────
-export async function updateBendahara(prevState: any, formData: FormData) {
-  const id = formData.get("id") as string;
-  const nama = formData.get("nama") as string;
-  const nohp = formData.get("nohp") as string | null;
-  const jeniskelamin = formData.get("jeniskelamin") as string | null;
-  const newPassword = formData.get("new_password") as string | null;
-
-  if (!id || !nama) {
-    return {
-      status: "error",
-      errors: { _form: ["ID dan nama wajib diisi"] },
-    };
-  }
-
-  const supabase = await createClient({ isAdmin: true });
-  const profile = await getSuperadminProfile();
-
-  // Update tabel admin
-  const { error: updateError } = await supabase
-    .from("admin")
+  const { error: dbError } = await supabase
+    .from("siswa")
     .update({
-      nama,
-      nohp: nohp || null,
-      jeniskelamin: jeniskelamin || null,
+      namawali: nama_wali,
+      email,
+      nowa: no_wa,
       updatedat: new Date().toISOString(),
     })
     .eq("id", id);
 
-  if (updateError) {
+  if (dbError) {
     return {
       status: "error",
-      errors: { _form: [updateError.message] },
+      errors: { _form: [`Gagal update data: ${dbError.message}`] },
     };
   }
 
-  // Update password jika diisi
-  if (newPassword && newPassword.length >= 6) {
-    const { error: pwError } = await supabase.auth.admin.updateUserById(id, {
-      password: newPassword,
-    });
-    if (pwError) {
-      return {
-        status: "error",
-        errors: { _form: [`Gagal update password: ${pwError.message}`] },
-      };
-    }
-  }
-
-  // Changelog
-  if (profile) {
-    await writeChangelog(supabase, {
-      idsuperadmin: profile.id,
-      namaaktor: profile.name || "Superadmin",
-      namamenu: "Kelola Bendahara",
-      jenisaksi: "UBAH",
-      deskripsi: `Mengubah data bendahara: ${nama}${newPassword ? " (termasuk reset password)" : ""}`,
-    });
-  }
+  await writeChangelog({
+    supabase,
+    namamenu: "Kelola Akun",
+    jenisaksi: "UBAH",
+    deskripsi: `Mengubah akun Wali Siswa: ${nama_wali} (${email})${
+      new_password ? " — password direset" : ""
+    }`,
+  });
 
   revalidatePath("/superadmin/bendahara");
   return { status: "success" };
 }
 
-// ─── Hapus bendahara ──────────────────────────────────────────────────────────
-export async function deleteBendahara(prevState: any, formData: FormData) {
-  const id = formData.get("id") as string;
-  const nama = formData.get("nama") as string;
+// ─── Update akun Bendahara ─────────────────────────────────────────────────
+export async function updateAkunBendahara(prevState: any, formData: FormData) {
+  const parsed = updateAkunBendaharaSchema.safeParse({
+    id: formData.get("id"),
+    nama: formData.get("nama"),
+    email: formData.get("email"),
+    no_hp: formData.get("no_hp"),
+    new_password: formData.get("new_password") || undefined,
+  });
 
-  if (!id) {
+  if (!parsed.success) {
+    const fieldErrors = parsed.error.flatten().fieldErrors;
+    const errorMessages = Object.entries(fieldErrors)
+      .map(([field, msgs]) => `${field}: ${(msgs as string[]).join(", ")}`)
+      .join(" | ");
     return {
       status: "error",
-      errors: { _form: ["ID bendahara tidak valid"] },
+      errors: { ...fieldErrors, _form: [errorMessages || "Validasi form gagal"] },
     };
+  }
+
+  const { id, nama, email, no_hp, new_password } = parsed.data;
+  const supabase = await createClient({ isAdmin: true });
+
+  const authUpdate: { email?: string; password?: string } = { email };
+  if (new_password) authUpdate.password = new_password;
+
+  const { error: authError } = await supabase.auth.admin.updateUserById(id, authUpdate);
+  if (authError) {
+    return {
+      status: "error",
+      errors: { _form: [`Gagal update akun: ${authError.message}`] },
+    };
+  }
+
+  const { error: dbError } = await supabase
+    .from("admin")
+    .update({
+      nama,
+      email,
+      nohp: no_hp,
+      updatedat: new Date().toISOString(),
+    })
+    .eq("id", id);
+
+  if (dbError) {
+    return {
+      status: "error",
+      errors: { _form: [`Gagal update data: ${dbError.message}`] },
+    };
+  }
+
+  await writeChangelog({
+    supabase,
+    namamenu: "Kelola Akun",
+    jenisaksi: "UBAH",
+    deskripsi: `Mengubah akun Bendahara: ${nama} (${email})${
+      new_password ? " — password direset" : ""
+    }`,
+  });
+
+  revalidatePath("/superadmin/bendahara");
+  return { status: "success" };
+}
+
+// ─── Hapus akun (Wali Siswa ATAU Bendahara) ────────────────────────────────
+export async function deleteAkun(prevState: any, formData: FormData) {
+  const id = formData.get("id") as string;
+  const source = formData.get("source") as "wali" | "bendahara";
+  const namaAkun = (formData.get("nama_akun") as string) || "-";
+
+  if (!id || !source) {
+    return { status: "error", errors: { _form: ["Data tidak valid"] } };
   }
 
   const supabase = await createClient({ isAdmin: true });
-  const profile = await getSuperadminProfile();
 
-  // Hapus dari auth (cascade ke tabel admin via FK)
-  const { error } = await supabase.auth.admin.deleteUser(id);
-
-  if (error) {
+  // Hapus user dari Supabase Auth — baris di tabel `siswa`/`admin` akan
+  // ikut terhapus lewat ON DELETE CASCADE (pola yang sama seperti
+  // deleteUser/deleteBendahara sebelumnya).
+  const { error: authError } = await supabase.auth.admin.deleteUser(id);
+  if (authError) {
     return {
       status: "error",
-      errors: { _form: [error.message] },
+      errors: { _form: [`Gagal menghapus akun: ${authError.message}`] },
     };
   }
 
-  // Changelog
-  if (profile) {
-    await writeChangelog(supabase, {
-      idsuperadmin: profile.id,
-      namaaktor: profile.name || "Superadmin",
-      namamenu: "Kelola Bendahara",
-      jenisaksi: "HAPUS",
-      deskripsi: `Menghapus bendahara: ${nama || id}`,
-    });
+  await writeChangelog({
+    supabase,
+    namamenu: "Kelola Akun",
+    jenisaksi: "HAPUS",
+    deskripsi: `Menghapus akun ${source === "wali" ? "Wali Siswa" : "Bendahara"}: ${namaAkun}`,
+  });
+
+  revalidatePath("/superadmin/bendahara");
+  return { status: "success" };
+}
+
+// ─── Create Bendahara (dipertahankan — akun Wali Siswa dibuat lewat
+//     halaman "Data Siswa" karena butuh field spesifik siswa seperti
+//     NIS/kelas/angkatan, tidak cocok dibuat dari sini) ────────────────────
+const createBendaharaSchema = z.object({
+  nama: z.string().min(1, "Nama wajib diisi"),
+  email: z.string().email("Format email tidak valid"),
+  password: z.string().min(6, "Password minimal 6 karakter"),
+  no_hp: z.string().min(1, "Nomor telepon wajib diisi"),
+});
+
+export async function createBendahara(prevState: any, formData: FormData) {
+  const parsed = createBendaharaSchema.safeParse({
+    nama: formData.get("nama"),
+    email: formData.get("email"),
+    password: formData.get("password"),
+    no_hp: formData.get("no_hp"),
+  });
+
+  if (!parsed.success) {
+    const fieldErrors = parsed.error.flatten().fieldErrors;
+    const errorMessages = Object.entries(fieldErrors)
+      .map(([field, msgs]) => `${field}: ${(msgs as string[]).join(", ")}`)
+      .join(" | ");
+    return {
+      status: "error",
+      errors: { ...fieldErrors, _form: [errorMessages || "Validasi form gagal"] },
+    };
   }
+
+  const { nama, email, password, no_hp } = parsed.data;
+  const supabase = await createClient({ isAdmin: true });
+
+  const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: { role: "admin", nama },
+  });
+
+  if (authError || !authData.user) {
+    return {
+      status: "error",
+      errors: { _form: [`Gagal membuat akun: ${authError?.message}`] },
+    };
+  }
+
+  const { error: dbError } = await supabase.from("admin").insert({
+    id: authData.user.id,
+    nama,
+    email,
+    nohp: no_hp,
+  });
+
+  if (dbError) {
+    await supabase.auth.admin.deleteUser(authData.user.id);
+    return {
+      status: "error",
+      errors: { _form: [`Gagal menyimpan data: ${dbError.message}`] },
+    };
+  }
+
+  await writeChangelog({
+    supabase,
+    namamenu: "Kelola Akun",
+    jenisaksi: "TAMBAH",
+    deskripsi: `Menambahkan akun Bendahara baru: ${nama} (${email})`,
+  });
 
   revalidatePath("/superadmin/bendahara");
   return { status: "success" };

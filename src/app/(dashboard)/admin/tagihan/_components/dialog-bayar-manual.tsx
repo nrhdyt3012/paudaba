@@ -150,7 +150,6 @@ export default function DialogBayarManual({
       setTipePembayaran("cash");
       handleRemoveFile();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentData, open]);
 
   const sisaTagihan = parseFloat(currentData?.sisa || currentData?.jumlahtagihan || "0");
@@ -232,8 +231,8 @@ export default function DialogBayarManual({
               form={form}
               name="jumlahbayar"
               label="Jumlah Dibayarkan (Rp)"
-              placeholder="Contoh: 50000"
-              type="number"
+              placeholder="Contoh: 50.000"
+              type="currency"
             />
 
             {/* FIX: Upload Bukti Pembayaran */}
@@ -251,6 +250,7 @@ export default function DialogBayarManual({
                 </button>
               ) : (
                 <div className="relative w-fit">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={buktiPreview}
                     alt="Preview bukti pembayaran"

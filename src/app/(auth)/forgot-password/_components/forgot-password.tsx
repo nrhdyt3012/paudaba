@@ -5,61 +5,36 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DarkmodeToggle } from "@/components/common/darkmode-toggle";
-import { Loader2, Mail, ArrowLeft, CheckCircle } from "lucide-react";
+import { MessageCircle, ArrowLeft } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { startTransition, useActionState, useEffect, useState } from "react";
-import { sendResetPasswordEmail } from "../actions";
-import { toast } from "sonner";
+import { useState } from "react";
 
-const INITIAL_STATE = { status: "idle", message: "" };
+// FIX: forgot password sekarang mengarah ke kontak WhatsApp admin/bendahara
+// (via wa.me, BUKAN Fonnte — wa.me cuma buka aplikasi WhatsApp user sendiri
+// dengan pesan yang sudah terisi otomatis, tidak butuh API key apa pun).
+// Ganti nomor di bawah ini kalau nomor admin/bendahara berubah.
+const ADMIN_WA_NUMBER_RAW = "082229308120";
+
+// wa.me butuh format internasional tanpa angka 0 di depan (62xxxxxxxxxx).
+function toWaFormat(nomor: string): string {
+  const digitsOnly = nomor.replace(/\D/g, "");
+  if (digitsOnly.startsWith("0")) return "62" + digitsOnly.slice(1);
+  if (digitsOnly.startsWith("62")) return digitsOnly;
+  return "62" + digitsOnly;
+}
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState("");
-  const [state, action, isPending] = useActionState(sendResetPasswordEmail, INITIAL_STATE);
 
-  const onSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const formData = new FormData();
-    formData.append("email", email);
-    startTransition(() => { action(formData); });
+  const handleHubungiWA = () => {
+    const nomor = toWaFormat(ADMIN_WA_NUMBER_RAW);
+    const pesan = email
+      ? `Assalamu'alaikum, saya lupa password akun PPPM-BM saya.\n\nEmail/akun: ${email}\n\nMohon bantuannya untuk reset password. Terima kasih.`
+      : `Assalamu'alaikum, saya lupa password akun PPPM-BM saya. Mohon bantuannya untuk reset password. Terima kasih.`;
+    const url = `https://wa.me/${nomor}?text=${encodeURIComponent(pesan)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
   };
-
-  useEffect(() => {
-    if (state.status === "error") {
-      toast.error("Gagal mengirim email", { description: state.message });
-    }
-  }, [state]);
-
-  if (state.status === "success") {
-    return (
-      <div className="relative flex min-h-screen w-full flex-col items-center justify-center bg-gradient-to-b from-white via-white to-blue-100 dark:from-gray-900 dark:via-gray-800 dark:to-blue-950 p-6">
-        <div className="absolute top-4 right-4"><DarkmodeToggle /></div>
-        <Card className="w-full max-w-md shadow-xl">
-          <CardContent className="pt-6">
-            <div className="flex flex-col items-center gap-4 text-center">
-              <div className="w-16 h-16 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center">
-                <CheckCircle className="w-10 h-10 text-green-600" />
-              </div>
-              <div>
-                <h2 className="text-xl font-bold mb-2">Email Terkirim!</h2>
-                <p className="text-muted-foreground text-sm">
-                  Link reset password telah dikirim ke <strong>{email}</strong>.
-                  Silakan cek inbox atau folder spam Anda.
-                </p>
-              </div>
-              <Link href="/login" className="w-full">
-                <Button variant="outline" className="w-full">
-                  <ArrowLeft className="w-4 h-4 mr-2" />
-                  Kembali ke Login
-                </Button>
-              </Link>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
 
   return (
     <div className="relative flex min-h-screen w-full flex-col items-center justify-center bg-gradient-to-b from-white via-white to-blue-100 dark:from-gray-900 dark:via-gray-800 dark:to-blue-950 p-6">
@@ -70,38 +45,49 @@ export default function ForgotPassword() {
       <Card className="w-full max-w-md shadow-xl">
         <CardHeader className="text-center space-y-2">
           <div className="flex justify-center mb-2">
-            <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center">
-              <Mail className="w-6 h-6 text-blue-600" />
+            <div className="w-12 h-12 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center">
+              <MessageCircle className="w-6 h-6 text-green-600" />
             </div>
           </div>
           <CardTitle className="text-2xl">Lupa Password?</CardTitle>
           <CardDescription>
-            Masukkan email Anda dan kami akan mengirimkan link untuk reset password
+            Hubungi admin/bendahara sekolah via WhatsApp untuk bantuan reset
+            password akun Anda.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={onSubmit} className="space-y-4">
+          <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">Email Akun Anda (opsional)</Label>
               <Input
                 id="email"
                 type="email"
                 placeholder="email@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                required
               />
+              <p className="text-xs text-muted-foreground">
+                Diisi supaya pesan WhatsApp otomatis menyertakan email akun
+                Anda, memudahkan admin mencari data Anda.
+              </p>
             </div>
-            <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700" disabled={isPending}>
-              {isPending ? <><Loader2 className="mr-2 animate-spin" />Mengirim...</> : "Kirim Link Reset Password"}
+
+            <Button
+              type="button"
+              onClick={handleHubungiWA}
+              className="w-full bg-green-600 hover:bg-green-700"
+            >
+              <MessageCircle className="w-4 h-4 mr-2" />
+              Hubungi via WhatsApp
             </Button>
+
             <Link href="/login" className="block">
               <Button variant="ghost" className="w-full">
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 Kembali ke Login
               </Button>
             </Link>
-          </form>
+          </div>
         </CardContent>
       </Card>
     </div>

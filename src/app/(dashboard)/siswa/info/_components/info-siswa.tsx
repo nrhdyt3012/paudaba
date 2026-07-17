@@ -176,6 +176,10 @@ export default function InfoSiswa() {
           <CardContent className="space-y-1">
             <InfoItem icon={User} label="Nama Wali" value={siswaData?.namawali} />
             <InfoItem icon={Phone} label="No. WhatsApp" value={siswaData?.nowa} />
+            {/* FIX: tambah Alamat, diambil dari kolom `alamat` di tabel
+                siswa. Kalau kolom ini belum ada di database, tambahkan
+                dulu lewat migration (lihat README). */}
+            <InfoItem icon={MapPin} label="Alamat" value={siswaData?.alamat} />
           </CardContent>
         </Card>
 

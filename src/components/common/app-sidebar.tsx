@@ -77,7 +77,7 @@ const SUPERADMIN_MENU = [
 ];
 
 const SUPERADMIN_EXCLUSIVE_MENU = [
-  { title: "Kelola Bendahara", url: "/superadmin/bendahara", icon: ShieldCheck },
+  { title: "Kelola Akun", url: "/superadmin/bendahara", icon: ShieldCheck },
 ];
 
 const SISWA_MENU = [

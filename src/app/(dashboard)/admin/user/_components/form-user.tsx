@@ -118,6 +118,16 @@ export default function FormUser<T extends FieldValues>({
               placeholder="Contoh: 08123456789"
             />
 
+            {/* FIX: field Alamat baru, ditampilkan di halaman Info Siswa
+                (kartu Data Wali Siswa) */}
+            <FormInput
+              form={form}
+              name={"alamat" as Path<T>}
+              label="Alamat (Opsional)"
+              placeholder="Alamat tempat tinggal"
+              type="textarea"
+            />
+
             <div className="grid grid-cols-2 gap-4">
               <FormInput
                 form={form}

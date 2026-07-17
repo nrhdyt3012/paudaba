@@ -167,7 +167,7 @@ export function SendWhatsAppNotificationButton(
                 🔔 *PEMBERITAHUAN TAGIHAN*
                 {"\n\n"}
                 Halo {guardianName}, anak Anda {studentName} memiliki tagihan
-                pembayaran. Silakan lakukan pembayaran melalui aplikasi PAUDABA.
+                pembayaran. Silakan lakukan pembayaran melalui aplikasi PPPM-BM.
               </div>
             </div>
 
