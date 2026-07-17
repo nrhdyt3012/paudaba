@@ -67,7 +67,7 @@ const ADMIN_MENU = [
 ];
 
 const SUPERADMIN_MENU = [
-  { title: "Dashboard Admin", url: "/admin", icon: LayoutDashboard },
+  { title: "Dashboard", url: "/admin", icon: LayoutDashboard },
   { title: "Rekapan Pembayaran", url: "/admin/rekapan-pembayaran", icon: Receipt },
   { title: "Rekapan Tunggakan", url: "/admin/rekapan-tunggakan", icon: AlertCircle },
   { title: "Master Tagihan", url: "/admin/menu", icon: ClipboardList },

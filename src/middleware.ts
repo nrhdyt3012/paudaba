@@ -139,9 +139,39 @@ export async function middleware(request: NextRequest) {
   }
 
   if (user && isAuthPage) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/";
-    return NextResponse.redirect(url);
+    const userRole = getUserRole(request);
+
+    if (userRole) {
+      // Role diketahui dengan pasti dari cookie — user memang masih login
+      // sah, langsung ke dashboard sesuai role-nya (tidak lewat "/" lagi,
+      // supaya tidak ada hop tambahan yang berpotensi nyangkut).
+      const url = request.nextUrl.clone();
+      url.pathname =
+        userRole === "superadmin"
+          ? "/superadmin"
+          : userRole === "admin"
+          ? "/admin"
+          : "/siswa/info";
+      return NextResponse.redirect(url);
+    }
+
+    // FIX BUG "stuck di beranda tiap klik Login": Supabase auth token masih
+    // dianggap valid (`user` ada), TAPI cookie `user_profile` (custom,
+    // nyimpan role) sudah hilang/tidak sinkron. Kalau dibiarkan redirect ke
+    // "/", root page juga akan gagal menemukan role dan melempar balik ke
+    // "/beranda" — user jadi TIDAK PERNAH bisa mencapai halaman login lagi
+    // selama Supabase masih menganggap sesi itu valid. Solusinya: paksa
+    // logout total di sini (hapus semua cookie Supabase + user_profile)
+    // supaya state-nya bersih, baru izinkan lanjut ke halaman login.
+    const response = NextResponse.next({ request });
+    await supabase.auth.signOut();
+    response.cookies.delete("user_profile");
+    request.cookies.getAll().forEach(({ name }) => {
+      if (name.includes("-auth-token") || name.includes("sb-")) {
+        response.cookies.delete(name);
+      }
+    });
+    return response;
   }
 
   // ✅ ROLE-BASED ROUTE PROTECTION

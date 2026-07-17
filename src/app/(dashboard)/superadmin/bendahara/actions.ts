@@ -23,7 +23,10 @@ import { z } from "zod";
 
 const updateAkunWaliSchema = z.object({
   id: z.string().min(1),
-  nama_wali: z.string().min(1, "Nama wali wajib diisi"),
+  // FIX: Nama Akun untuk akun siswa sekarang mengedit `namasiswa` (nama
+  // anak), BUKAN `namawali` (nama orang tua) — konsisten dengan halaman
+  // Info Siswa (pojok kiri bawah sidebar) yang juga pakai nama anak.
+  nama_siswa: z.string().min(1, "Nama siswa wajib diisi"),
   email: z.string().email("Format email tidak valid"),
   no_wa: z.string().min(1, "Nomor WhatsApp wajib diisi"),
   new_password: z
@@ -47,7 +50,7 @@ const updateAkunBendaharaSchema = z.object({
 export async function updateAkunWali(prevState: any, formData: FormData) {
   const parsed = updateAkunWaliSchema.safeParse({
     id: formData.get("id"),
-    nama_wali: formData.get("nama_wali"),
+    nama_siswa: formData.get("nama_siswa"),
     email: formData.get("email"),
     no_wa: formData.get("no_wa"),
     new_password: formData.get("new_password") || undefined,
@@ -64,7 +67,7 @@ export async function updateAkunWali(prevState: any, formData: FormData) {
     };
   }
 
-  const { id, nama_wali, email, no_wa, new_password } = parsed.data;
+  const { id, nama_siswa, email, no_wa, new_password } = parsed.data;
   const supabase = await createClient({ isAdmin: true });
 
   // Update email/password di Supabase Auth kalau ada perubahan
@@ -83,7 +86,7 @@ export async function updateAkunWali(prevState: any, formData: FormData) {
   const { error: dbError } = await supabase
     .from("siswa")
     .update({
-      namawali: nama_wali,
+      namasiswa: nama_siswa,
       email,
       nowa: no_wa,
       updatedat: new Date().toISOString(),
@@ -101,8 +104,8 @@ export async function updateAkunWali(prevState: any, formData: FormData) {
     supabase,
     namamenu: "Kelola Akun",
     jenisaksi: "UBAH",
-    deskripsi: `Mengubah akun Wali Siswa: ${nama_wali} (${email})${
-      new_password ? " — password direset" : ""
+    deskripsi: `Mengubah akun Wali Siswa: ${nama_siswa} (${email})${
+      new_password ? " — password diganti" : ""
     }`,
   });
 
@@ -167,7 +170,7 @@ export async function updateAkunBendahara(prevState: any, formData: FormData) {
     namamenu: "Kelola Akun",
     jenisaksi: "UBAH",
     deskripsi: `Mengubah akun Bendahara: ${nama} (${email})${
-      new_password ? " — password direset" : ""
+      new_password ? " — password diganti" : ""
     }`,
   });
 
