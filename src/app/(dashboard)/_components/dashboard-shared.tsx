@@ -52,10 +52,14 @@ export default function DashboardShared() {
   const [showSudahBayarDialog, setShowSudahBayarDialog] = useState(false);
 
   // ─── Siswa sesuai filter angkatan ─────────────────────────────────────────
+  // FIX: pakai `is_active` (bukan `status`) — sekarang satu-satunya sumber
+  // kebenaran soal "siswa/akun ini aktif atau tidak" dikendalikan dari
+  // Kelola Akun, bukan field `status` yang terpisah (yang sudah dihapus
+  // dari halaman Data Siswa).
   const { data: siswaFiltered } = useQuery({
     queryKey: ["siswa-by-angkatan", angkatan],
     queryFn: async () => {
-      let query = supabase.from("siswa").select("id, kelas, status, angkatan, jeniskelamin");
+      let query = supabase.from("siswa").select("id, kelas, is_active, angkatan, jeniskelamin");
       if (angkatan !== "semua") query = query.eq("angkatan", angkatan);
       const { data } = await query;
       return data || [];
@@ -68,7 +72,7 @@ export default function DashboardShared() {
     queryKey: ["siswa-stats", angkatan, siswaFiltered],
     enabled: !!siswaFiltered,
     queryFn: async () => {
-      const aktif = (siswaFiltered || []).filter((s: any) => s.status === "aktif");
+      const aktif = (siswaFiltered || []).filter((s: any) => s.is_active !== false);
       const lakiLaki = aktif.filter(
         (s: any) =>
           s.jeniskelamin === "Laki-laki" ||
@@ -480,8 +484,7 @@ export default function DashboardShared() {
           </div>
 
           {!isLoadingTunggakan && filteredTunggakan.length > 0 && (
-            <div className="px-8 py-4 border-t shrink-0 grid grid-cols-3 items-center bg-muted/30">
-              <span />
+            <div className="px-8 py-4 border-t shrink-0 flex flex-col items-center gap-2 bg-muted/30">
               <span className="text-sm text-muted-foreground text-center">
                 Menampilkan{" "}
                 {(currentPage - 1) * ITEMS_PER_PAGE + 1}–
@@ -489,8 +492,8 @@ export default function DashboardShared() {
                 dari {filteredTunggakan.length} tagihan
               </span>
 
-              {totalPages > 1 ? (
-                <div className="flex items-center gap-1 justify-self-end">
+              {totalPages > 1 && (
+                <div className="flex items-center gap-1">
                   <Button
                     variant="outline"
                     size="sm"
@@ -554,8 +557,6 @@ export default function DashboardShared() {
                     »
                   </Button>
                 </div>
-              ) : (
-                <span />
               )}
             </div>
           )}

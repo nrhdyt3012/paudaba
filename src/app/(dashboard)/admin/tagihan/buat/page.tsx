@@ -152,7 +152,7 @@ export default function BuatTagihanPage() {
       let q = supabase
         .from("siswa")
         .select("id, namasiswa, kelas, nis, tipe_spp")
-        .eq("status", "aktif")
+        .eq("is_active", true)
         .order("kelas").order("namasiswa");
       if (filterKelas !== "semua") q = q.eq("kelas", filterKelas);
       if (filterTipeSPP !== "semua") q = q.eq("tipe_spp", filterTipeSPP);

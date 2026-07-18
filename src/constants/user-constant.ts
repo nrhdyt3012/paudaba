@@ -13,6 +13,5 @@ export const HEADER_TABLE_USER = [
   "Kelas",
   "Angkatan",
   "Tipe SPP",
-  "Status",
   "Action",
 ];

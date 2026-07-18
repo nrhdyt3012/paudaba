@@ -121,17 +121,9 @@ export default function UserManagement() {
         {item.tipe_spp || "reguler"}
       </span>,
 
-      // Status
-      <span
-        key={`status-${item.id}`}
-        className={`px-2 py-1 rounded-full text-xs font-medium ${
-          item.status === "aktif"
-            ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100"
-            : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
-        }`}
-      >
-        {item.status || "aktif"}
-      </span>,
+      // FIX: kolom Status dihapus dari halaman ini (arahan kamu) — status
+      // keaktifan akun sekarang dikendalikan terpusat dari menu Kelola
+      // Akun (kolom `is_active`), tidak perlu duplikasi konsep di sini.
 
       // Aksi
       <DropdownAction
@@ -159,7 +151,10 @@ export default function UserManagement() {
                   tanggalLahir: item.tanggallahir,
                   jeniskelamin: item.jeniskelamin,
                   tipe_spp: item.tipe_spp || "reguler",
-                  status: item.status,
+                  // FIX: alamat sebelumnya kelewat, belum ikut ke-prefill
+                  // di dialog Edit (cuma tampil di tabel). "status" dihapus
+                  // dari sini (kolomnya sudah tidak dipakai lagi).
+                  alamat: item.alamat,
                   role: "siswa",
                 } as Profile & { jeniskelamin?: string; tipe_spp?: string },
                 type: "update",

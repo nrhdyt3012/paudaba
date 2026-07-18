@@ -75,7 +75,9 @@ export async function createUser(prevState: AuthFormState, formData: FormData) {
       tanggallahir: validatedFields.data.tanggal_lahir || null,
       alamat: validatedFields.data.alamat || null,
       tipe_spp: validatedFields.data.tipe_spp || "reguler",
-      status: "aktif",
+      // FIX: `status: "aktif"` dihapus — kolom itu sudah tidak dipakai lagi
+      // (digantikan `is_active`, yang otomatis default `true` dari skema
+      // database, jadi tidak perlu diisi manual di sini).
     });
 
     if (insertError) {

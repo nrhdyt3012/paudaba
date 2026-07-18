@@ -75,7 +75,7 @@ export default function SiswaListDialog({
       const { data } = await supabase
         .from("siswa")
         .select("kelas, angkatan")
-        .eq("status", "aktif");
+        .eq("is_active", true);
       const kelasSet = new Set<string>();
       const angkatanSet = new Set<string>();
       (data || []).forEach((s: any) => {
@@ -97,9 +97,9 @@ export default function SiswaListDialog({
       let query = supabase
         .from("siswa")
         .select(
-          "id, nis, namasiswa, jeniskelamin, tempatlahir, tanggallahir, namawali, nowa, kelas, angkatan, tipe_spp, status"
+          "id, nis, namasiswa, jeniskelamin, tempatlahir, tanggallahir, namawali, nowa, kelas, angkatan, tipe_spp, is_active"
         )
-        .eq("status", "aktif")
+        .eq("is_active", true)
         .order("namasiswa");
 
       if (filterKelas !== "semua") query = query.eq("kelas", filterKelas);
@@ -246,7 +246,6 @@ export default function SiswaListDialog({
                     <th className="p-3 text-left">Kelas</th>
                     <th className="p-3 text-left">Angkatan</th>
                     <th className="p-3 text-left">Tipe</th>
-                    <th className="p-3 text-left">Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -283,11 +282,6 @@ export default function SiswaListDialog({
                           {s.tipe_spp || "reguler"}
                         </span>
                       </td>
-                      <td className="p-3">
-                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100">
-                          {s.status || "aktif"}
-                        </span>
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -296,16 +290,18 @@ export default function SiswaListDialog({
           )}
         </div>
 
-        {/* Footer pagination */}
+        {/* Footer pagination — FIX: pagination sekarang benar-benar di
+            tengah (bukan justify-self-end/kanan), disusun vertikal stack
+            supaya tetap center meski teks "Menampilkan..." panjangnya
+            berubah-ubah. */}
         {filtered.length > 0 && (
-          <div className="px-8 py-4 border-t shrink-0 grid grid-cols-3 items-center bg-muted/30">
-            <span />
+          <div className="px-8 py-4 border-t shrink-0 flex flex-col items-center gap-2 bg-muted/30">
             <span className="text-sm text-muted-foreground text-center">
               Menampilkan {(currentPage - 1) * ITEMS_PER_PAGE + 1}–
               {Math.min(currentPage * ITEMS_PER_PAGE, filtered.length)} dari {filtered.length} siswa
             </span>
-            {totalPages > 1 ? (
-              <div className="flex items-center gap-1 justify-self-end">
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1">
                 <Button
                   variant="outline"
                   size="sm"
@@ -326,8 +322,6 @@ export default function SiswaListDialog({
                   ›
                 </Button>
               </div>
-            ) : (
-              <span />
             )}
           </div>
         )}
