@@ -21,18 +21,14 @@ import { z } from "zod";
 // ini — lihat komentar di komponen bendahara.tsx.
 // ════════════════════════════════════════════════════════════════════════
 
-const updateAkunWaliSchema = z.object({
+// FIX (arahan dosen pembimbing): untuk akun Wali Siswa, superadmin di
+// halaman Kelola Akun HANYA boleh mengganti password — edit nama/email/no
+// WA tetap lewat menu Data Siswa (satu-satunya sumber kebenaran untuk data
+// itu). Jadi `updateAkunWali` (full edit) diganti jadi `changePasswordWali`
+// yang cuma menerima `id` + `new_password`.
+const changePasswordWaliSchema = z.object({
   id: z.string().min(1),
-  // FIX: Nama Akun untuk akun siswa sekarang mengedit `namasiswa` (nama
-  // anak), BUKAN `namawali` (nama orang tua) — konsisten dengan halaman
-  // Info Siswa (pojok kiri bawah sidebar) yang juga pakai nama anak.
-  nama_siswa: z.string().min(1, "Nama siswa wajib diisi"),
-  email: z.string().email("Format email tidak valid"),
-  no_wa: z.string().min(1, "Nomor WhatsApp wajib diisi"),
-  new_password: z
-    .string()
-    .optional()
-    .refine((v) => !v || v.length >= 6, "Password baru minimal 6 karakter"),
+  new_password: z.string().min(6, "Password baru minimal 6 karakter"),
 });
 
 const updateAkunBendaharaSchema = z.object({
@@ -46,14 +42,12 @@ const updateAkunBendaharaSchema = z.object({
     .refine((v) => !v || v.length >= 6, "Password baru minimal 6 karakter"),
 });
 
-// ─── Update akun Wali Siswa ────────────────────────────────────────────────
-export async function updateAkunWali(prevState: any, formData: FormData) {
-  const parsed = updateAkunWaliSchema.safeParse({
+// ─── Ganti password akun Wali Siswa (satu-satunya aksi edit yang tersedia
+//     untuk role ini di halaman Kelola Akun) ────────────────────────────────
+export async function changePasswordWali(prevState: any, formData: FormData) {
+  const parsed = changePasswordWaliSchema.safeParse({
     id: formData.get("id"),
-    nama_siswa: formData.get("nama_siswa"),
-    email: formData.get("email"),
-    no_wa: formData.get("no_wa"),
-    new_password: formData.get("new_password") || undefined,
+    new_password: formData.get("new_password"),
   });
 
   if (!parsed.success) {
@@ -67,36 +61,72 @@ export async function updateAkunWali(prevState: any, formData: FormData) {
     };
   }
 
-  const { id, nama_siswa, email, no_wa, new_password } = parsed.data;
+  const { id, new_password } = parsed.data;
   const supabase = await createClient({ isAdmin: true });
 
-  // Update email/password di Supabase Auth kalau ada perubahan
-  const authUpdate: { email?: string; password?: string } = {};
-  authUpdate.email = email;
-  if (new_password) authUpdate.password = new_password;
-
-  const { error: authError } = await supabase.auth.admin.updateUserById(id, authUpdate);
+  const { error: authError } = await supabase.auth.admin.updateUserById(id, {
+    password: new_password,
+  });
   if (authError) {
     return {
       status: "error",
-      errors: { _form: [`Gagal update akun: ${authError.message}`] },
+      errors: { _form: [`Gagal mengganti password: ${authError.message}`] },
     };
   }
 
-  const { error: dbError } = await supabase
+  const { data: siswaRow } = await supabase
     .from("siswa")
-    .update({
-      namasiswa: nama_siswa,
-      email,
-      nowa: no_wa,
-      updatedat: new Date().toISOString(),
-    })
+    .select("namasiswa")
+    .eq("id", id)
+    .maybeSingle();
+
+  await writeChangelog({
+    supabase,
+    namamenu: "Kelola Akun",
+    jenisaksi: "UBAH",
+    deskripsi: `Mengganti password akun Wali Siswa: ${siswaRow?.namasiswa || id}`,
+  });
+
+  revalidatePath("/superadmin/bendahara");
+  return { status: "success" };
+}
+
+// ─── Aktifkan / nonaktifkan akun (Wali Siswa ATAU Bendahara) ─────────────────
+// FIX (arahan dosen pembimbing, disebut "Ubah Hak Akses" di UI): superadmin
+// bisa menonaktifkan akun tanpa menghapusnya secara permanen. Akun yang
+// dinonaktifkan tetap ada datanya, tapi ditolak saat mencoba login (lihat
+// pengecekan `is_active` di src/app/(auth)/login/actions.ts).
+const toggleAkunStatusSchema = z.object({
+  id: z.string().min(1),
+  source: z.enum(["wali", "bendahara"]),
+  is_active: z.enum(["true", "false"]),
+});
+
+export async function toggleAkunStatus(prevState: any, formData: FormData) {
+  const parsed = toggleAkunStatusSchema.safeParse({
+    id: formData.get("id"),
+    source: formData.get("source"),
+    is_active: formData.get("is_active"),
+  });
+
+  if (!parsed.success) {
+    return { status: "error", errors: { _form: ["Data tidak valid"] } };
+  }
+
+  const { id, source, is_active } = parsed.data;
+  const newStatus = is_active === "true";
+  const supabase = await createClient({ isAdmin: true });
+
+  const table = source === "wali" ? "siswa" : "admin";
+  const { error } = await supabase
+    .from(table)
+    .update({ is_active: newStatus, updatedat: new Date().toISOString() })
     .eq("id", id);
 
-  if (dbError) {
+  if (error) {
     return {
       status: "error",
-      errors: { _form: [`Gagal update data: ${dbError.message}`] },
+      errors: { _form: [`Gagal mengubah status akun: ${error.message}`] },
     };
   }
 
@@ -104,9 +134,9 @@ export async function updateAkunWali(prevState: any, formData: FormData) {
     supabase,
     namamenu: "Kelola Akun",
     jenisaksi: "UBAH",
-    deskripsi: `Mengubah akun Wali Siswa: ${nama_siswa} (${email})${
-      new_password ? " — password diganti" : ""
-    }`,
+    deskripsi: `${newStatus ? "Mengaktifkan kembali" : "Menonaktifkan"} akun ${
+      source === "wali" ? "Wali Siswa" : "Bendahara"
+    } (id: ${id})`,
   });
 
   revalidatePath("/superadmin/bendahara");

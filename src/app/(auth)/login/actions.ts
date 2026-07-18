@@ -66,14 +66,14 @@ if (error) {
     // ── Cek tabel admin / bendahara ─────────────────────────────────────────
     const { data: adminData } = await authSupabase
       .from("admin")
-      .select("id, nama")
+      .select("id, nama, is_active")
       .eq("id", user.id)
       .maybeSingle();
 
     // ── Cek tabel siswa ─────────────────────────────────────────────────────
     const { data: siswaData } = await authSupabase
       .from("siswa")
-      .select("id, namasiswa, avatarurl, kelas, nis")
+      .select("id, namasiswa, avatarurl, kelas, nis, is_active")
       .eq("id", user.id)
       .maybeSingle();
 
@@ -113,6 +113,26 @@ if (error) {
         status: "error",
         errors: {
           _form: ["Profil pengguna tidak ditemukan. Hubungi administrator."],
+        },
+      };
+    }
+
+    // FIX: cek status aktif/nonaktif — kalau akun (Wali Siswa atau
+    // Bendahara) sudah dinonaktifkan superadmin lewat "Kelola Akun", tolak
+    // login di sini walau kredensialnya benar. Superadmin tidak dicek
+    // (tidak ada fitur nonaktifkan untuk superadmin).
+    const isDeactivated =
+      (adminData && adminData.is_active === false) ||
+      (siswaData && siswaData.is_active === false);
+
+    if (isDeactivated) {
+      await supabase.auth.signOut();
+      return {
+        status: "error",
+        errors: {
+          _form: [
+            "Akun Anda telah dinonaktifkan. Hubungi admin/superadmin sekolah untuk bantuan.",
+          ],
         },
       };
     }

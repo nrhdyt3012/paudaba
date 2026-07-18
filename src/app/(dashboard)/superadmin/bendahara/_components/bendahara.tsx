@@ -8,7 +8,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -22,10 +21,12 @@ import DataTable from "@/components/common/data-table";
 import DropdownAction from "@/components/common/dropdown-action";
 import {
   Plus, Search, Loader2, Pencil, Trash2, KeyRound, ShieldCheck, Users,
+  Power, PowerOff,
 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import {
-  updateAkunWali, updateAkunBendahara, deleteAkun, createBendahara,
+  changePasswordWali, updateAkunBendahara, deleteAkun, createBendahara,
+  toggleAkunStatus,
 } from "../actions";
 
 const ITEMS_PER_PAGE = 10;
@@ -40,9 +41,11 @@ type AkunRow = {
   id: string;
   source: "wali" | "bendahara";
   namaAkun: string;
+  nis?: string;
   email: string;
   noTelp: string;
   role: string;
+  isActive: boolean;
 };
 
 export default function BendaharaManagement() {
@@ -53,30 +56,33 @@ export default function BendaharaManagement() {
   const [filterRole, setFilterRole] = useState("semua");
   const [currentPage, setCurrentPage] = useState(1);
   const [showCreate, setShowCreate] = useState(false);
+  const [optimisticAkunList, setOptimisticAkunList] = useState<AkunRow[] | null>(null);
   const [selectedAction, setSelectedAction] = useState<
-    { data: AkunRow; type: "edit" | "delete" } | null
+    { data: AkunRow; type: "edit" | "ganti-password" | "toggle-status" | "delete" } | null
   >(null);
 
-  // ─── Ambil data Wali Siswa + Bendahara, gabung jadi satu list ──────────
-  // FIX: "Nama Akun" untuk baris Wali Siswa sekarang dari `namasiswa`
-  // (nama ANAK), bukan `namawali` (nama orang tua) — konsisten dengan
-  // halaman Info Siswa (sidebar pojok kiri bawah) yang juga pakai nama
-  // anak untuk identitas akun siswa yang sedang login.
+  // FIX: "Nama Akun" untuk baris Wali Siswa dari `namasiswa` (nama ANAK),
+  // bukan `namawali` — konsisten dengan halaman Info Siswa. NIS ikut
+  // diambil untuk jadi pembeda visual kalau ada nama yang mirip/sama.
+  // `is_active` ikut diambil untuk kolom Status & aksi
+  // aktifkan/nonaktifkan.
   const { data: akunList, isLoading } = useQuery({
     queryKey: ["kelola-akun-list"],
     queryFn: async () => {
       const [{ data: siswaData }, { data: adminData }] = await Promise.all([
-        supabase.from("siswa").select("id, namasiswa, email, nowa").order("namasiswa"),
-        supabase.from("admin").select("id, nama, email, nohp").order("nama"),
+        supabase.from("siswa").select("id, namasiswa, nis, email, nowa, is_active").order("namasiswa"),
+        supabase.from("admin").select("id, nama, email, nohp, is_active").order("nama"),
       ]);
 
       const waliRows: AkunRow[] = (siswaData || []).map((s: any) => ({
         id: s.id,
         source: "wali",
         namaAkun: s.namasiswa || "-",
+        nis: s.nis || "",
         email: s.email || "-",
         noTelp: s.nowa || "-",
         role: "Wali Siswa",
+        isActive: s.is_active !== false,
       }));
 
       const bendaharaRows: AkunRow[] = (adminData || []).map((a: any) => ({
@@ -86,6 +92,7 @@ export default function BendaharaManagement() {
         email: a.email || "-",
         noTelp: a.nohp || "-",
         role: "Bendahara",
+        isActive: a.is_active !== false,
       }));
 
       return [...waliRows, ...bendaharaRows];
@@ -93,9 +100,27 @@ export default function BendaharaManagement() {
   });
 
   useEffect(() => { setCurrentPage(1); }, [search, filterRole]);
+  useEffect(() => {
+    if (akunList) {
+      setOptimisticAkunList(akunList);
+    }
+  }, [akunList]);
+
+  const handleAkunStatusChange = (id: string, isActive: boolean) => {
+    setOptimisticAkunList((prev) =>
+      prev
+        ? prev.map((item) => (item.id === id ? { ...item, isActive } : item))
+        : null
+    );
+
+    queryClient.setQueryData<AkunRow[]>(["kelola-akun-list"], (old) =>
+      old ? old.map((item) => (item.id === id ? { ...item, isActive } : item)) : undefined
+    );
+  };
 
   const filteredAkun = useMemo(() => {
-    let result = akunList || [];
+    const sourceData = optimisticAkunList ?? akunList ?? [];
+    let result = sourceData;
     if (filterRole !== "semua") result = result.filter((a) => a.source === filterRole);
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -103,11 +128,12 @@ export default function BendaharaManagement() {
         (a) =>
           a.namaAkun.toLowerCase().includes(q) ||
           a.email.toLowerCase().includes(q) ||
-          a.noTelp.toLowerCase().includes(q)
+          a.noTelp.toLowerCase().includes(q) ||
+          (a.nis || "").toLowerCase().includes(q)
       );
     }
     return result;
-  }, [akunList, filterRole, search]);
+  }, [optimisticAkunList, akunList, filterRole, search]);
 
   const totalPages = Math.ceil(filteredAkun.length / ITEMS_PER_PAGE);
   const paginated = filteredAkun.slice(
@@ -118,14 +144,16 @@ export default function BendaharaManagement() {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["kelola-akun-list"] });
   const handleChangeAction = (open: boolean) => { if (!open) setSelectedAction(null); };
 
-  // FIX: kolom "Password" dihapus dari tabel — sebelumnya cuma tampil
-  // "••••••••" + ikon mata yang kalau diklik nunjukin "tidak bisa
-  // ditampilkan", jadi nggak ada gunanya ditampilkan sama sekali di list.
-  // Kalau nanti mau diisi kolom lain, gampang ditambah lagi (No. Telepon
-  // sudah ada; kandidat lain: "Terakhir Login", "Status Akun", dsb).
   const tableData = paginated.map((item, index) => [
     (currentPage - 1) * ITEMS_PER_PAGE + index + 1,
-    <span key={`nama-${item.id}`} className="font-medium">{item.namaAkun}</span>,
+    <div key={`nama-${item.id}`}>
+      <p className="font-medium">{item.namaAkun}</p>
+      {/* FIX: NIS sebagai subtext pembeda kalau ada nama mirip/sama
+          (email di kolom sebelah juga selalu unik, jadi pembeda ganda). */}
+      {item.source === "wali" && item.nis && (
+        <p className="text-xs text-muted-foreground">NIS: {item.nis}</p>
+      )}
+    </div>,
     item.email,
     item.noTelp,
     <span
@@ -138,18 +166,49 @@ export default function BendaharaManagement() {
     >
       {item.role}
     </span>,
+    // FIX: kolom "Password" (yang lama, tidak berguna karena tidak bisa
+    // ditampilkan) diganti kolom "Status" — Aktif/Nonaktif.
+    <span
+      key={`status-${item.id}`}
+      className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+        item.isActive
+          ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100"
+          : "bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+      }`}
+    >
+      {item.isActive ? "Aktif" : "Nonaktif"}
+    </span>,
     <DropdownAction
       key={`act-${item.id}`}
       menu={[
+        // FIX (arahan dosen pembimbing): untuk Wali Siswa, satu-satunya
+        // aksi edit yang tersedia di sini adalah GANTI PASSWORD — edit
+        // nama/email/no WA tetap lewat menu Data Siswa.
+        item.source === "wali"
+          ? {
+              label: (
+                <span className="flex items-center gap-2 text-green-600">
+                  <KeyRound className="w-4 h-4" /> Ganti Password
+                </span>
+              ),
+              action: () => setSelectedAction({ data: item, type: "ganti-password" }),
+            }
+          : {
+              label: (
+                <span className="flex items-center gap-2 text-green-600">
+                  <Pencil className="w-4 h-4" /> Edit
+                </span>
+              ),
+              action: () => setSelectedAction({ data: item, type: "edit" }),
+            },
         {
           label: (
-            // FIX: ikon pensil/Edit sekarang hijau, konsisten dengan
-            // warna aksi utama di halaman lain.
-            <span className="flex items-center gap-2 text-green-600">
-              <Pencil className="w-4 h-4" /> Edit
+            <span className="flex items-center gap-2 text-amber-600">
+              {item.isActive ? <PowerOff className="w-4 h-4" /> : <Power className="w-4 h-4" />}
+              {item.isActive ? "Nonaktifkan" : "Aktifkan"} (Ubah Hak Akses)
             </span>
           ),
-          action: () => setSelectedAction({ data: item, type: "edit" }),
+          action: () => setSelectedAction({ data: item, type: "toggle-status" }),
         },
         {
           label: (
@@ -177,7 +236,7 @@ export default function BendaharaManagement() {
           <div className="relative">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Cari nama, email, atau no. telp..."
+              placeholder="Cari nama, email, NIS, atau no. telp..."
               className="pl-8 w-full sm:w-64"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -191,9 +250,6 @@ export default function BendaharaManagement() {
               ))}
             </SelectContent>
           </Select>
-          {/* FIX: tombol Tambah Bendahara sekarang hijau (bg-green-600),
-              konsisten dengan tombol aksi utama di halaman lain (bukan
-              ungu lagi). */}
           <Button onClick={() => setShowCreate(true)} className="bg-green-600 hover:bg-green-700">
             <Plus className="w-4 h-4 mr-2" />
             Tambah Bendahara
@@ -204,13 +260,13 @@ export default function BendaharaManagement() {
       <p className="text-xs text-muted-foreground flex items-center gap-1.5">
         <Users className="w-3.5 h-3.5" />
         Akun baru untuk <strong>Wali Siswa</strong> dibuat lewat menu{" "}
-        <strong>Data Siswa</strong> (butuh data NIS/kelas/angkatan). Halaman
-        ini untuk mengedit/menghapus akun yang sudah ada, dan menambah akun{" "}
-        <strong>Bendahara</strong> baru.
+        <strong>Data Siswa</strong>. Untuk akun Wali Siswa, halaman ini hanya
+        bisa <strong>ganti password</strong>, <strong>nonaktifkan/aktifkan</strong>,
+        atau <strong>hapus</strong> — edit nama/email/no WA tetap lewat Data Siswa.
       </p>
 
       <DataTable
-        header={["No", "Nama Akun", "Email", "No. Telepon", "Role", "Aksi"]}
+        header={["No", "Nama Akun", "Email", "No. Telepon", "Role", "Status", "Aksi"]}
         data={tableData}
         isLoading={isLoading}
         totalPages={totalPages}
@@ -226,10 +282,25 @@ export default function BendaharaManagement() {
         refetch={invalidate}
       />
 
-      <DialogEditAkun
+      <DialogGantiPasswordWali
+        open={selectedAction?.type === "ganti-password"}
+        currentData={selectedAction?.data}
+        handleChangeAction={handleChangeAction}
+        refetch={invalidate}
+      />
+
+      <DialogEditBendahara
         open={selectedAction?.type === "edit"}
         currentData={selectedAction?.data}
         handleChangeAction={handleChangeAction}
+        refetch={invalidate}
+      />
+
+      <DialogToggleStatus
+        open={selectedAction?.type === "toggle-status"}
+        currentData={selectedAction?.data}
+        handleChangeAction={handleChangeAction}
+        onStatusUpdated={handleAkunStatusChange}
         refetch={invalidate}
       />
 
@@ -296,8 +367,8 @@ function DialogCreateBendahara({
   );
 }
 
-// ─── Dialog: Edit Akun (form berbeda tergantung source) ──────────────────────
-function DialogEditAkun({
+// ─── Dialog: Ganti Password (khusus Wali Siswa) ──────────────────────────────
+function DialogGantiPasswordWali({
   open, currentData, handleChangeAction, refetch,
 }: {
   open: boolean;
@@ -305,12 +376,76 @@ function DialogEditAkun({
   handleChangeAction: (open: boolean) => void;
   refetch: () => void;
 }) {
-  const isWali = currentData?.source === "wali";
+  const form = useForm({ defaultValues: { new_password: "" } });
+  const [isPending, setIsPending] = useState(false);
 
+  useEffect(() => {
+    if (open) form.reset({ new_password: "" });
+  }, [open]);
+
+  const onSubmit = form.handleSubmit(async (data) => {
+    if (!currentData) return;
+    setIsPending(true);
+    const formData = new FormData();
+    formData.append("id", currentData.id);
+    formData.append("new_password", data.new_password);
+    const state = await changePasswordWali({}, formData);
+    setIsPending(false);
+
+    if (state.status === "error") {
+      toast.error("Gagal mengganti password", { description: state.errors?._form?.[0] });
+    } else {
+      toast.success(`Password akun ${currentData.namaAkun} berhasil diganti`);
+      handleChangeAction(false);
+      refetch();
+    }
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={handleChangeAction}>
+      <DialogContent className="sm:max-w-[380px]">
+        <Form {...form}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="w-5 h-5 text-green-600" />
+              Ganti Password
+            </DialogTitle>
+            <DialogDescription>
+              Akun Wali Siswa: <strong>{currentData?.namaAkun}</strong> ({currentData?.email})
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={onSubmit} className="space-y-3">
+            <FormInput
+              form={form}
+              name="new_password"
+              label="Password Baru"
+              placeholder="Minimal 6 karakter"
+              type="password"
+            />
+            <DialogFooter>
+              <DialogClose asChild><Button variant="outline" disabled={isPending}>Batal</Button></DialogClose>
+              <Button type="submit" disabled={isPending} className="bg-green-600 hover:bg-green-700">
+                {isPending ? <Loader2 className="animate-spin w-4 h-4" /> : "Ganti Password"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Dialog: Edit Bendahara (full — nama/email/no telp/password) ────────────
+function DialogEditBendahara({
+  open, currentData, handleChangeAction, refetch,
+}: {
+  open: boolean;
+  currentData?: AkunRow;
+  handleChangeAction: (open: boolean) => void;
+  refetch: () => void;
+}) {
   const form = useForm({
-    defaultValues: {
-      nama: "", email: "", no_telp: "", new_password: "",
-    },
+    defaultValues: { nama: "", email: "", no_telp: "", new_password: "" },
   });
   const [isPending, setIsPending] = useState(false);
   const [showPassInput, setShowPassInput] = useState(false);
@@ -333,22 +468,12 @@ function DialogEditAkun({
 
     const formData = new FormData();
     formData.append("id", currentData.id);
+    formData.append("nama", data.nama);
+    formData.append("email", data.email);
+    formData.append("no_hp", data.no_telp);
     if (data.new_password) formData.append("new_password", data.new_password);
 
-    let state;
-    if (isWali) {
-      // FIX: kirim sebagai `nama_siswa` (bukan `nama_wali`)
-      formData.append("nama_siswa", data.nama);
-      formData.append("email", data.email);
-      formData.append("no_wa", data.no_telp);
-      state = await updateAkunWali({}, formData);
-    } else {
-      formData.append("nama", data.nama);
-      formData.append("email", data.email);
-      formData.append("no_hp", data.no_telp);
-      state = await updateAkunBendahara({}, formData);
-    }
-
+    const state = await updateAkunBendahara({}, formData);
     setIsPending(false);
 
     if (state.status === "error") {
@@ -365,34 +490,17 @@ function DialogEditAkun({
       <DialogContent className="sm:max-w-[420px]">
         <Form {...form}>
           <DialogHeader>
-            {/* FIX: ikon judul hijau (konsisten dengan warna aksi edit) */}
             <DialogTitle className="flex items-center gap-2">
               <Pencil className="w-5 h-5 text-green-600" />
-              Edit Akun {isWali ? "Wali Siswa" : "Bendahara"}
+              Edit Akun Bendahara
             </DialogTitle>
             <DialogDescription>Ubah data akun di bawah ini</DialogDescription>
           </DialogHeader>
           <form onSubmit={onSubmit} className="space-y-3">
-            {/* FIX: label field ikut disesuaikan — "Nama Siswa" untuk akun
-                wali (karena yang diedit sekarang nama anak, bukan nama
-                orang tua). */}
-            <FormInput
-              form={form}
-              name="nama"
-              label={isWali ? "Nama Siswa" : "Nama"}
-              placeholder="Nama lengkap"
-            />
+            <FormInput form={form} name="nama" label="Nama" placeholder="Nama lengkap" />
             <FormInput form={form} name="email" label="Email" placeholder="email@example.com" type="email" />
-            <FormInput
-              form={form}
-              name="no_telp"
-              label={isWali ? "No. WhatsApp" : "No. Telepon"}
-              placeholder="08xxxxxxxxxx"
-            />
+            <FormInput form={form} name="no_telp" label="No. Telepon" placeholder="08xxxxxxxxxx" />
 
-            {/* FIX: "Reset password" → "Ganti password" (lebih akurat —
-                yang dilakukan memang mengganti ke password baru pilihan
-                sendiri, bukan reset ke nilai default/acak). */}
             {!showPassInput ? (
               <button
                 type="button"
@@ -414,13 +522,95 @@ function DialogEditAkun({
 
             <DialogFooter>
               <DialogClose asChild><Button variant="outline" disabled={isPending}>Batal</Button></DialogClose>
-              {/* FIX: tombol Simpan hijau (konsisten, sebelumnya biru) */}
               <Button type="submit" disabled={isPending} className="bg-green-600 hover:bg-green-700">
                 {isPending ? <Loader2 className="animate-spin w-4 h-4" /> : "Simpan Perubahan"}
               </Button>
             </DialogFooter>
           </form>
         </Form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Dialog: Aktifkan / Nonaktifkan (Ubah Hak Akses) ─────────────────────────
+function DialogToggleStatus({
+  open, currentData, handleChangeAction, onStatusUpdated, refetch,
+}: {
+  open: boolean;
+  currentData?: AkunRow;
+  handleChangeAction: (open: boolean) => void;
+  onStatusUpdated: (id: string, isActive: boolean) => void;
+  refetch: () => void;
+}) {
+  const [isPending, setIsPending] = useState(false);
+  const willActivate = currentData ? !currentData.isActive : false;
+
+  const handleConfirm = async () => {
+    if (!currentData) return;
+    setIsPending(true);
+    const formData = new FormData();
+    formData.append("id", currentData.id);
+    formData.append("source", currentData.source);
+    formData.append("is_active", willActivate ? "true" : "false");
+    const state = await toggleAkunStatus({}, formData);
+    setIsPending(false);
+
+    if (state.status === "error") {
+      toast.error("Gagal mengubah status akun", { description: state.errors?._form?.[0] });
+      return;
+    }
+
+    toast.success(
+      willActivate
+        ? `Akun ${currentData.namaAkun} diaktifkan kembali`
+        : `Akun ${currentData.namaAkun} dinonaktifkan`
+    );
+
+    onStatusUpdated(currentData.id, willActivate);
+
+    handleChangeAction(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleChangeAction}>
+      <DialogContent className="sm:max-w-[400px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-amber-600">
+            {willActivate ? <Power className="w-5 h-5" /> : <PowerOff className="w-5 h-5" />}
+            {willActivate ? "Aktifkan Akun" : "Nonaktifkan Akun"}
+          </DialogTitle>
+          <DialogDescription>
+            {willActivate ? (
+              <>
+                Akun <strong>{currentData?.namaAkun}</strong> akan bisa login
+                kembali seperti biasa.
+              </>
+            ) : (
+              <>
+                Akun <strong>{currentData?.namaAkun}</strong> ({currentData?.role}) akan
+                ditolak saat mencoba login, tapi datanya <strong>tidak dihapus</strong> —
+                bisa diaktifkan lagi kapan saja.
+              </>
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <DialogClose asChild><Button variant="outline" disabled={isPending}>Batal</Button></DialogClose>
+          <Button
+            onClick={handleConfirm}
+            disabled={isPending}
+            className={willActivate ? "bg-green-600 hover:bg-green-700" : "bg-amber-600 hover:bg-amber-700"}
+          >
+            {isPending ? (
+              <Loader2 className="animate-spin w-4 h-4" />
+            ) : willActivate ? (
+              "Ya, Aktifkan"
+            ) : (
+              "Ya, Nonaktifkan"
+            )}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -466,7 +656,9 @@ function DialogDeleteAkun({
           </DialogTitle>
           <DialogDescription>
             Yakin ingin menghapus akun <strong>{currentData?.namaAkun}</strong>{" "}
-            ({currentData?.role})? Tindakan ini tidak dapat dibatalkan.
+            ({currentData?.role})? Tindakan ini <strong>tidak dapat dibatalkan</strong>{" "}
+            — kalau cuma ingin membatasi akses sementara, gunakan &quot;Nonaktifkan&quot;
+            saja.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
