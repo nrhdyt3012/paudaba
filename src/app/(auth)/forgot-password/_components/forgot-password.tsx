@@ -74,6 +74,10 @@ export default function ForgotPassword() {
             Hubungi admin/bendahara sekolah via WhatsApp untuk bantuan reset
             password akun Anda.
           </CardDescription>
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
+            Catatan: fitur ini hanya untuk wali siswa yang lupa password akun
+            mereka.
+          </div>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
