@@ -53,12 +53,21 @@ export async function createUser(prevState: AuthFormState, formData: FormData) {
     },
   });
 
-  if (authError) {
-    return {
-      status: "error",
-      errors: { ...prevState?.errors, _form: [authError.message] },
-    };
-  }
+if (authError) {
+  const isDuplicateEmail =
+    authError.message.toLowerCase().includes("already been registered") ||
+    authError.message.toLowerCase().includes("already registered") ||
+    authError.code === "email_exists";
+
+  const message = isDuplicateEmail
+    ? "Email ini sudah terdaftar oleh akun lain. Silakan gunakan alamat email yang berbeda."
+    : authError.message;
+
+  return {
+    status: "error",
+    errors: { ...prevState?.errors, _form: [message] },
+  };
+}
 
   if (data?.user) {
     const { error: insertError } = await supabase.from("siswa").upsert({

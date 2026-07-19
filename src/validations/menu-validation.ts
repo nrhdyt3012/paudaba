@@ -17,7 +17,15 @@ export const menuFormSchema = z
 
     // Common
     jenjang: z.string().min(1, "Jenjang wajib dipilih"),
-    nominal: z.string().min(1, "Nominal wajib diisi"),
+    nominal: z
+  .string()
+  .min(1, "Nominal wajib diisi")
+  .refine((val) => /^\d+$/.test(val), {
+    message: "Nominal harus berupa angka",
+  })
+  .refine((val) => Number(val) > 1000, {
+    message: "Nominal harus lebih dari 1000",
+  }),
     description: z.string().optional(),
   })
   .superRefine((data, ctx) => {

@@ -5,6 +5,9 @@ import DropdownAction from "@/components/common/dropdown-action";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import useDataTable from "@/hooks/use-data-table";
 import { createClient } from "@/lib/supabase/client";
 import { useQuery } from "@tanstack/react-query";
@@ -17,6 +20,39 @@ import DialogUpdateUser from "./dialog-update-user";
 import DialogDeleteUser from "./dialog-delete-user";
 import { Profile } from "@/types/auth";
 
+const KELAS_FILTER_OPTIONS = [
+  { value: "semua", label: "Semua Kelas" },
+  { value: "KB", label: "KB" },
+  { value: "TK A", label: "TK A" },
+  { value: "TK B", label: "TK B" },
+];
+
+const JENIS_KELAMIN_FILTER_OPTIONS = [
+  { value: "semua", label: "Semua Jenis Kelamin" },
+  { value: "laki-laki", label: "Laki-laki" },
+  { value: "perempuan", label: "Perempuan" },
+];
+
+const SORT_OPTIONS = [
+  { value: "terbaru", label: "Terbaru Ditambahkan" },
+  { value: "nis", label: "NIS (Kecil → Besar)" },
+  { value: "nama", label: "Nama (A → Z)" },
+];
+
+// FIX: helper normalisasi jenis kelamin — data lama kadang tersimpan
+// beda-beda casing/singkatan ("Laki-laki"/"laki-laki"/"L"), jadi filter
+// jenis kelamin dilakukan di client (bukan `.eq()` langsung ke Supabase)
+// supaya tetap akurat untuk data lama maupun baru. Pola yang sama dengan
+// yang dipakai di popup dashboard (siswa-list-dialog.tsx).
+function isLakiLaki(jk: string | null | undefined) {
+  const v = (jk || "").toLowerCase();
+  return v === "laki-laki" || v === "l";
+}
+function isPerempuan(jk: string | null | undefined) {
+  const v = (jk || "").toLowerCase();
+  return v === "perempuan" || v === "p";
+}
+
 export default function UserManagement() {
   const supabase = createClient();
   const {
@@ -28,19 +64,27 @@ export default function UserManagement() {
     handleChangeSearch,
   } = useDataTable();
 
+  const [filterKelas, setFilterKelas] = useState("semua");
+  const [filterJenisKelamin, setFilterJenisKelamin] = useState("semua");
+  const [sortBy, setSortBy] = useState("terbaru");
+
+  // FIX: query sekarang ambil SEMUA baris yang cocok search+kelas (tanpa
+  // `.range()` server-side) — karena filter Jenis Kelamin & sortir NIS/Nama
+  // dilakukan di client (lihat alasan di helper isLakiLaki/isPerempuan di
+  // atas), jadi pagination juga digeser jadi di client supaya hasilnya
+  // tetap akurat & konsisten.
   const { data: users, isLoading, refetch } = useQuery({
-    queryKey: ["siswa-list", currentPage, currentLimit, currentSearch],
+    queryKey: ["siswa-list", currentSearch, filterKelas],
     queryFn: async () => {
-      let query = supabase
-        .from("siswa")
-        .select("*", { count: "exact" })
-        .range((currentPage - 1) * currentLimit, currentPage * currentLimit - 1)
-        .order("createdat", { ascending: false });
+      let query = supabase.from("siswa").select("*");
 
       if (currentSearch) {
         query = query.or(
           `namasiswa.ilike.%${currentSearch}%,nis.ilike.%${currentSearch}%,kelas.ilike.%${currentSearch}%`
         );
+      }
+      if (filterKelas !== "semua") {
+        query = query.eq("kelas", filterKelas);
       }
 
       const result = await query;
@@ -60,8 +104,56 @@ export default function UserManagement() {
     if (!open) setSelectedAction(null);
   };
 
+  // FIX: filter Jenis Kelamin + sortir (NIS naik / Nama A-Z / terbaru)
+  // diterapkan di sini, sebelum data dipotong per halaman.
+  const filteredSorted = useMemo(() => {
+    let rows = users?.data || [];
+
+    if (filterJenisKelamin === "laki-laki") {
+      rows = rows.filter((r: any) => isLakiLaki(r.jeniskelamin));
+    } else if (filterJenisKelamin === "perempuan") {
+      rows = rows.filter((r: any) => isPerempuan(r.jeniskelamin));
+    }
+
+    rows = [...rows].sort((a: any, b: any) => {
+      if (sortBy === "nis") {
+        const nisA = parseInt(a.nis, 10);
+        const nisB = parseInt(b.nis, 10);
+        const validA = !isNaN(nisA);
+        const validB = !isNaN(nisB);
+        if (validA && validB) return nisA - nisB;
+        if (validA) return -1; // NIS valid didahulukan dari yang kosong/non-angka
+        if (validB) return 1;
+        return (a.nis || "").localeCompare(b.nis || "");
+      }
+      if (sortBy === "nama") {
+        return (a.namasiswa || "").localeCompare(b.namasiswa || "");
+      }
+      // "terbaru" (default)
+      return (
+        new Date(b.createdat).getTime() - new Date(a.createdat).getTime()
+      );
+    });
+
+    return rows;
+  }, [users, filterJenisKelamin, sortBy]);
+
+  const totalPages = useMemo(
+    () => Math.ceil(filteredSorted.length / currentLimit),
+    [filteredSorted, currentLimit]
+  );
+
+  const paginatedRows = useMemo(
+    () =>
+      filteredSorted.slice(
+        (currentPage - 1) * currentLimit,
+        currentPage * currentLimit
+      ),
+    [filteredSorted, currentPage, currentLimit]
+  );
+
   const filteredData = useMemo(() => {
-    return (users?.data || []).map((item: any, index: number) => [
+    return paginatedRows.map((item: any, index: number) => [
       currentLimit * (currentPage - 1) + index + 1,
 
       // NIS
@@ -183,12 +275,7 @@ export default function UserManagement() {
         ]}
       />,
     ]);
-  }, [users, currentLimit, currentPage]);
-
-  const totalPages = useMemo(
-    () => (users?.count ? Math.ceil(users.count / currentLimit) : 0),
-    [users, currentLimit]
-  );
+  }, [paginatedRows]);
 
   return (
     <div className="w-full">
@@ -197,11 +284,47 @@ export default function UserManagement() {
           <h1 className="text-2xl font-bold">Data Siswa</h1>
           <p className="text-sm text-muted-foreground">Kelola data siswa KB, TK A, dan TK B</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Input
             placeholder="Cari nama, NIS, atau kelas..."
+            className="w-full sm:w-56"
             onChange={(e) => handleChangeSearch(e.target.value)}
           />
+          {/* FIX: filter Kelas & Jenis Kelamin (pola sama seperti popup
+              dashboard), plus dropdown sortir NIS/Nama. */}
+          <Select
+            value={filterKelas}
+            onValueChange={(v) => { setFilterKelas(v); handleChangePage(1); }}
+          >
+            <SelectTrigger className="w-full sm:w-[150px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {KELAS_FILTER_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={filterJenisKelamin}
+            onValueChange={(v) => { setFilterJenisKelamin(v); handleChangePage(1); }}
+          >
+            <SelectTrigger className="w-full sm:w-[170px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {JENIS_KELAMIN_FILTER_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={sortBy}
+            onValueChange={(v) => { setSortBy(v); handleChangePage(1); }}
+          >
+            <SelectTrigger className="w-full sm:w-[190px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {SORT_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Dialog>
             <DialogTrigger asChild>
               <Button className="bg-green-600 hover:bg-green-700">

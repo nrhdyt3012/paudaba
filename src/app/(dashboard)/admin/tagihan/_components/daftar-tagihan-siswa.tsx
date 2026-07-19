@@ -102,7 +102,7 @@ export default function DaftarTagihanSiswa() {
         .from("tagihan_siswa").select("*", { count: "exact", head: true });
       const { count: belumBayar } = await supabase
         .from("tagihan_siswa").select("*", { count: "exact", head: true })
-        .eq("statuspembayaran", "BELUM BAYAR");
+        .in("statuspembayaran", ["BELUM BAYAR", "BELUM LUNAS"]);
       const { count: lunas } = await supabase
         .from("tagihan_siswa").select("*", { count: "exact", head: true })
         .eq("statuspembayaran", "LUNAS");

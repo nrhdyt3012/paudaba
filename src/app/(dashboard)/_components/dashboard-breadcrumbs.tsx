@@ -25,6 +25,7 @@ const PATH_LABELS: Record<string, string> = {
   payment: "Pembayaran",
   success: "Berhasil",
   failed: "Gagal",
+  bendahara:"Kelola Akun"
 };
 
 export default function DashboardBreadcrumb() {

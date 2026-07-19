@@ -294,7 +294,7 @@ export default function DashboardShared() {
             className="cursor-pointer transition-shadow hover:shadow-md hover:border-green-300"
           >
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Sudah Terbayar</CardTitle>
+              <CardTitle className="text-sm font-medium">Sudah Lunas</CardTitle>
               <CheckCircle className="h-4 w-4 text-green-600" />
             </CardHeader>
             <CardContent>
@@ -311,7 +311,7 @@ export default function DashboardShared() {
             className="cursor-pointer transition-shadow hover:shadow-md hover:border-red-300"
           >
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Belum Terbayar</CardTitle>
+              <CardTitle className="text-sm font-medium">Belum Lunas</CardTitle>
               <AlertCircle className="h-4 w-4 text-red-500" />
             </CardHeader>
             <CardContent>

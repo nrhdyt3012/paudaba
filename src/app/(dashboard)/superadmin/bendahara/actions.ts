@@ -288,14 +288,30 @@ export async function createBendahara(prevState: any, formData: FormData) {
     };
   }
 
-  const { error: dbError } = await supabase.from("admin").insert({
-    id: authData.user.id,
-    nama,
-    email,
-    nohp: no_hp,
-  });
+  // FIX: trigger `handle_new_user()` di database sudah otomatis insert baris
+  // ke `public.admin` (id, email) begitu user Auth dibuat dengan metadata
+  // role: "admin" — trigger membaca `nama` dari key metadata "name" (bukan
+  // "nama"), jadi kolom `nama` di baris yang dibuat trigger tetap NULL, dan
+  // kolom `nohp` memang tidak diisi trigger sama sekali.
+  // Pakai UPSERT (bukan update biasa) supaya tidak bergantung pada apakah
+  // baris sudah sempat dibuat trigger atau belum — kalau baris dengan id
+  // ini sudah ada, dilengkapi; kalau belum ada, langsung dibuat.
+  const { error: dbError } = await supabase
+    .from("admin")
+    .upsert(
+      {
+        id: authData.user.id,
+        nama,
+        email,
+        nohp: no_hp,
+        updatedat: new Date().toISOString(),
+      },
+      { onConflict: "id" }
+    );
 
   if (dbError) {
+    // Rollback: hapus user Auth yang sudah terlanjur dibuat kalau
+    // pelengkapan data di tabel admin gagal.
     await supabase.auth.admin.deleteUser(authData.user.id);
     return {
       status: "error",

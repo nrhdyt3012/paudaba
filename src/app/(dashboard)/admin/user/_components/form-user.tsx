@@ -71,7 +71,7 @@ export default function FormUser<T extends FieldValues>({
               <FormInput
                 form={form}
                 name={"NIS" as Path<T>}
-                label="NIS (Opsional)"
+                label="NIS"
                 placeholder="Nomor Induk Siswa"
               />
               <FormSelect
