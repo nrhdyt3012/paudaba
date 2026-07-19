@@ -1,10 +1,16 @@
 // src/constants/menu-constant.ts
+// FIX: kolom "Jenis Tagihan" dihapus dari tabel — sudah otomatis "terbaca"
+// lewat Nama Tagihan yang di-generate (mis. "SPP Bulanan TK A ... Reguler"
+// sudah menyebutkan jenisnya di dalam namanya sendiri), jadi kolom
+// terpisah untuk itu redundan. Kolom "Keterangan" ditambahkan (sebelumnya
+// datanya ada tapi cuma nongol sebagai subtext kecil di bawah nama, sekarang
+// jadi kolom sendiri biar jelas kebaca).
 export const HEADER_TABLE_MENU = [
   "No",
   "Nama Tagihan",
   "Jenjang",
-  "Jenis Tagihan",
   "Nominal",
+  "Keterangan",
   "Action",
 ];
 

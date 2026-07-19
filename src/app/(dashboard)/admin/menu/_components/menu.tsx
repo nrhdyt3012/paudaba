@@ -47,18 +47,23 @@ export default function MenuManagement() {
   const filteredData = useMemo(() => {
     return (menus?.data || []).map((item: any, index: number) => [
       currentLimit * (currentPage - 1) + index + 1,
-      <div key={`nama-${item.id_mastertagihan}`}>
-        <p className="font-semibold">{item.namatagihan}</p>
-        {item.description && <p className="text-xs text-muted-foreground">{item.description}</p>}
-      </div>,
+      // FIX: description dipindah keluar dari sini (dulu numpang jadi
+      // subtext di bawah nama), sekarang jadi kolom "Keterangan" sendiri
+      // di bagian bawah.
+      <p key={`nama-${item.id_mastertagihan}`} className="font-semibold">
+        {item.namatagihan}
+      </p>,
       <span key={`jenjang-${item.id_mastertagihan}`} className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100">
         {item.jenjang}
       </span>,
-      <span key={`jenis-${item.id_mastertagihan}`} className={`px-2 py-1 rounded-full text-xs ${item.jenistagihan === "Reguler" ? "bg-green-100 text-green-800" : "bg-orange-100 text-orange-800"}`}>
-        {item.jenistagihan}
-      </span>,
       <span key={`nominal-${item.id_mastertagihan}`} className="font-semibold">
         {convertIDR(parseFloat(item.nominal || 0))}
+      </span>,
+      // FIX: kolom "Jenis Tagihan" (badge Reguler/Subsidi) DIHAPUS — sudah
+      // otomatis kebaca dari Nama Tagihan yang di-generate, jadi kolom
+      // terpisah untuk itu redundan.
+      <span key={`keterangan-${item.id_mastertagihan}`} className="text-sm text-muted-foreground">
+        {item.description || "-"}
       </span>,
       <DropdownAction
         key={`action-${item.id_mastertagihan}`}
