@@ -3,6 +3,11 @@
 import { createClient } from "@/lib/supabase/server";
 import { writeChangelog } from "@/lib/changelog";
 import { revalidatePath } from "next/cache";
+import {
+  syncRekapanSetelahPembayaran,
+  seedRekapanTunggakanBaru,
+  hapusRekapanTunggakan,
+} from "@/lib/rekapan-helper";
 
 const first = (v: any) => (Array.isArray(v) ? v[0] : v);
 
@@ -171,6 +176,20 @@ export async function bayarTagihanManual(prevState: any, formData: FormData) {
     console.error("[bayarTagihanManual] Error insert pembayaran:", insertError);
   }
 
+  // FIX (arahan dosen pembimbing): snapshot ke rekapan_pembayaran +
+  // sinkronkan rekapan_tunggakan setiap ada pembayaran manual sukses.
+  if (pembayaranData?.idpembayaran) {
+    await syncRekapanSetelahPembayaran(supabase, {
+      idpembayaran: pembayaranData.idpembayaran,
+      idtagihansiswa: parseInt(idTagihan),
+      jumlahdibayar: jumlahBayar,
+      tanggalpembayaran: new Date().toISOString(),
+      metodepembayaran: tipePembayaran,
+      sisaSetelahTransaksiIni: sisaSetelahIni,
+      statusTagihanTerbaru: statusBaru,
+    });
+  }
+
   const namaSiswa = first(tagihan.siswa)?.namasiswa || "-";
   const namaTagihan = first(tagihan.master_tagihan)?.namatagihan || "-";
 
@@ -185,6 +204,7 @@ export async function bayarTagihanManual(prevState: any, formData: FormData) {
 
   revalidatePath("/admin/tagihan");
   revalidatePath("/admin/rekapan-pembayaran");
+  revalidatePath("/admin/rekapan-tunggakan");
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
@@ -297,6 +317,10 @@ export async function deleteTagihanSiswa(prevState: any, formData: FormData) {
     };
   }
 
+  // FIX: bersihkan juga baris snapshot-nya di rekapan_tunggakan (kalau
+  // ada) — tagihannya sendiri sudah tidak ada lagi.
+  await hapusRekapanTunggakan(supabase, parseInt(idTagihan));
+
   await writeChangelog({
     supabase,
     namamenu: "Tagihan Siswa",
@@ -305,6 +329,7 @@ export async function deleteTagihanSiswa(prevState: any, formData: FormData) {
   });
 
   revalidatePath("/admin/tagihan");
+  revalidatePath("/admin/rekapan-tunggakan");
   return { status: "success" };
 }
 
@@ -403,6 +428,18 @@ export async function createTagihanBatch(
     };
   }
 
+  // FIX (arahan dosen pembimbing): seed rekapan_tunggakan untuk tiap
+  // tagihan yang baru dibuat — langsung muncul sebagai tunggakan (status
+  // BELUM BAYAR, sisa = nominal penuh) sejak awal, tidak perlu nunggu ada
+  // cicilan dulu baru muncul di rekapan.
+  if (insertedTagihan?.length) {
+    await Promise.allSettled(
+      insertedTagihan.map((t: any) =>
+        seedRekapanTunggakanBaru(supabase, t.idtagihansiswa, parseFloat(masterTagihan.nominal))
+      )
+    );
+  }
+
   await writeChangelog({
     supabase,
     namamenu: "Tagihan Siswa",
@@ -411,6 +448,7 @@ export async function createTagihanBatch(
   });
 
   revalidatePath("/admin/tagihan");
+  revalidatePath("/admin/rekapan-tunggakan");
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 

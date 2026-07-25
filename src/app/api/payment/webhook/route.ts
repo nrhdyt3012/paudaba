@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { environment } from "@/configs/environtment";
 import crypto from "crypto";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { syncRekapanSetelahPembayaran, hapusRekapanTunggakan } from "@/lib/rekapan-helper";
 
 function getAdminClient() {
   return createSupabaseClient(
@@ -182,6 +183,10 @@ export async function POST(request: NextRequest) {
           },
         });
 
+        // Idempotency: pastikan rekapan_tunggakan bersih (dihapus) karena
+        // status sudah dipastikan LUNAS di jalur duplikat ini juga.
+        await hapusRekapanTunggakan(supabase, parseInt(tagihanId));
+
         return NextResponse.json({ status: "already_paid_synced" });
       }
     }
@@ -322,6 +327,24 @@ export async function POST(request: NextRequest) {
     console.log(
       `✅ [WEBHOOK] Done: tagihan=${tagihanId}, status=${statuspembayaranTagihan}, pembayaranId=${pembayaranId}`
     );
+
+    // FIX (arahan dosen pembimbing): snapshot ke rekapan_pembayaran +
+    // sinkronkan rekapan_tunggakan — hanya untuk transaksi yang BENAR-BENAR
+    // sukses (settlement/capture), bukan untuk expire/cancel/deny.
+    if (
+      pembayaranId !== null &&
+      (transaction_status === "settlement" || transaction_status === "capture")
+    ) {
+      await syncRekapanSetelahPembayaran(supabase, {
+        idpembayaran: pembayaranId,
+        idtagihansiswa: parseInt(tagihanId),
+        jumlahdibayar: nominalBayar,
+        tanggalpembayaran: new Date().toISOString(),
+        metodepembayaran,
+        sisaSetelahTransaksiIni,
+        statusTagihanTerbaru: statuspembayaranTagihan,
+      });
+    }
 
     // Kirim notifikasi hanya saat transaksi benar-benar sukses
     if (
