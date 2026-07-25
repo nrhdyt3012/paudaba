@@ -60,9 +60,8 @@ export default function PembayaranListDialog({
           metodepembayaran,
           statuspembayaran,
           tagihan_siswa:tagihan_siswa!idtagihansiswa(
-            bulan, tahun,
-            siswa:siswa!idsiswa(id, namasiswa, kelas),
-            master_tagihan:master_tagihan!idmastertagihan(namatagihan, jenjang)
+            bulan, tahun, namatagihan, jenjang,
+            siswa:siswa!idsiswa(id, namasiswa, kelas)
           )
         `)
         .eq("statuspembayaran", "SUCCESS")
@@ -84,10 +83,10 @@ export default function PembayaranListDialog({
     return (rawData || []).filter((item: any) => {
       const tagihan = first(item.tagihan_siswa);
       const siswa = first(tagihan?.siswa);
-      const master = first(tagihan?.master_tagihan);
       const nama = siswa?.namasiswa?.toLowerCase() || "";
       const kelas = siswa?.kelas?.toLowerCase() || "";
-      const namaTagihan = master?.namatagihan?.toLowerCase() || "";
+      // FIX: baca dari kolom snapshot langsung (tagihan?.namatagihan)
+      const namaTagihan = tagihan?.namatagihan?.toLowerCase() || "";
       return nama.includes(q) || kelas.includes(q) || namaTagihan.includes(q);
     });
   }, [rawData, search]);
@@ -156,7 +155,6 @@ export default function PembayaranListDialog({
                 {paginated.map((item: any, i: number) => {
                   const tagihan = first(item.tagihan_siswa);
                   const siswa = first(tagihan?.siswa);
-                  const master = first(tagihan?.master_tagihan);
                   return (
                     <tr key={item.idpembayaran} className="border-b hover:bg-muted/50">
                       <td className="p-3 text-muted-foreground">
@@ -164,7 +162,7 @@ export default function PembayaranListDialog({
                       </td>
                       <td className="p-3 font-medium">{siswa?.namasiswa || "-"}</td>
                       <td className="p-3">{siswa?.kelas || "-"}</td>
-                      <td className="p-3">{master?.namatagihan || "-"}</td>
+                      <td className="p-3">{tagihan?.namatagihan || "-"}</td>
                       <td className="p-3 capitalize">{item.metodepembayaran || "-"}</td>
                       <td className="p-3 text-right font-semibold text-green-600">
                         {convertIDR(parseFloat(item.jumlahdibayar || 0))}

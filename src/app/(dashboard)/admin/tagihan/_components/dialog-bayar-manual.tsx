@@ -184,7 +184,7 @@ export default function DialogBayarManual({
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Tagihan:</span>
-                <span>{currentData?.master_tagihan?.namatagihan || "-"}</span>
+                <span>{currentData?.namatagihan || "-"}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Periode:</span>

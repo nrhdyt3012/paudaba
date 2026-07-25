@@ -176,8 +176,10 @@ export default function RekapanPembayaran() {
             bulan,
             tahun,
             jumlahtagihan,
-            siswa:siswa!idsiswa(id, namasiswa, kelas),
-            master_tagihan:master_tagihan!idmastertagihan(namatagihan, jenjang, jenistagihan)
+            namatagihan,
+            jenjang,
+            jenistagihan,
+            siswa:siswa!idsiswa(id, namasiswa, kelas)
           )
         `)
         .eq("statuspembayaran", "SUCCESS")
@@ -211,7 +213,8 @@ export default function RekapanPembayaran() {
             idpembayaran,
             jumlahdibayar,
             tagihan_siswa:tagihan_siswa!idtagihansiswa(
-              master_tagihan:master_tagihan!idmastertagihan(jenjang, jenistagihan)
+              jenjang,
+              jenistagihan
             )
           `)
           .eq("statuspembayaran", "SUCCESS")
@@ -221,9 +224,10 @@ export default function RekapanPembayaran() {
         const breakdown: Record<string, number> = {};
         (data || []).forEach((item: any) => {
           const tagihan = first(item.tagihan_siswa);
-          const master = first(tagihan?.master_tagihan);
-          const jenjang = master?.jenjang || "Lainnya";
-          const jenis = master?.jenistagihan || "";
+          // FIX: jenjang & jenistagihan sekarang dari kolom snapshot
+          // langsung (tagihan?.jenjang, tagihan?.jenistagihan)
+          const jenjang = tagihan?.jenjang || "Lainnya";
+          const jenis = tagihan?.jenistagihan || "";
           const key = jenis ? `${jenjang} ${jenis}` : jenjang;
           breakdown[key] = (breakdown[key] || 0) + 1;
         });
@@ -264,7 +268,6 @@ export default function RekapanPembayaran() {
     const rows = pembayaranData.map((item: any, i: number) => {
       const tagihan = first(item.tagihan_siswa);
       const siswa = first(tagihan?.siswa);
-      const master = first(tagihan?.master_tagihan);
       const sisa = item.sisa_setelah_transaksi_ini != null
         ? Number(item.sisa_setelah_transaksi_ini)
         : null;
@@ -273,9 +276,9 @@ export default function RekapanPembayaran() {
         "ID Pembayaran": item.idpembayaran,
         "Nama Siswa": siswa?.namasiswa || "-",
         Kelas: siswa?.kelas || "-",
-        "Nama Tagihan": master?.namatagihan || "-",
-        Jenjang: master?.jenjang || "-",
-        Jenis: master?.jenistagihan || "-",
+        "Nama Tagihan": tagihan?.namatagihan || "-",
+        Jenjang: tagihan?.jenjang || "-",
+        Jenis: tagihan?.jenistagihan || "-",
         "Periode Tagihan": tagihan ? `${BULAN_NAMA[tagihan.bulan]} ${tagihan.tahun}` : "-",
         "Metode Bayar": item.metodepembayaran || "-",
         "Nominal Dibayar (transaksi ini)": parseFloat(item.jumlahdibayar || 0),
@@ -418,14 +421,13 @@ export default function RekapanPembayaran() {
                   {pembayaranData.map((item: any, i: number) => {
                     const tagihan = first(item.tagihan_siswa);
                     const siswa = first(tagihan?.siswa);
-                    const master = first(tagihan?.master_tagihan);
                     const sisa = item.sisa_setelah_transaksi_ini;
                     return (
                       <tr key={item.idpembayaran} className="border-b hover:bg-muted/50">
                         <td className="p-3">{i + 1}</td>
                         <td className="p-3 font-medium">{siswa?.namasiswa || "-"}</td>
                         <td className="p-3">{siswa?.kelas || "-"}</td>
-                        <td className="p-3">{master?.namatagihan || "-"}</td>
+                        <td className="p-3">{tagihan?.namatagihan || "-"}</td>
                         <td className="p-3 capitalize">{item.metodepembayaran || "-"}</td>
                         <td className="p-3 text-right font-semibold">
                           {convertIDR(parseFloat(item.jumlahdibayar || 0))}

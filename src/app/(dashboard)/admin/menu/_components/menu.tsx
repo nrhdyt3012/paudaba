@@ -5,6 +5,9 @@ import DropdownAction from "@/components/common/dropdown-action";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import useDataTable from "@/hooks/use-data-table";
 import { createClient } from "@/lib/supabase/client";
 import { convertIDR } from "@/lib/utils";
@@ -18,12 +21,29 @@ import DialogCreateMenu from "./dialog-create-menu";
 import DialogUpdateMenu from "./dialog-update-menu";
 import DialogDeleteMenu from "./dialog-delete-menu";
 
+// FIX: filter Jenjang & Jenis Tagihan (Reguler/Subsidi) baru
+const JENJANG_FILTER_OPTIONS = [
+  { value: "semua", label: "Semua Jenjang" },
+  { value: "KB", label: "KB" },
+  { value: "TK A", label: "TK A" },
+  { value: "TK B", label: "TK B" },
+];
+
+const JENIS_FILTER_OPTIONS = [
+  { value: "semua", label: "Semua Jenis" },
+  { value: "Reguler", label: "Reguler" },
+  { value: "Subsidi", label: "Subsidi" },
+];
+
 export default function MenuManagement() {
   const supabase = createClient();
   const { currentPage, currentLimit, currentSearch, handleChangePage, handleChangeLimit, handleChangeSearch } = useDataTable();
 
+  const [filterJenjang, setFilterJenjang] = useState("semua");
+  const [filterJenis, setFilterJenis] = useState("semua");
+
   const { data: menus, isLoading, refetch } = useQuery({
-    queryKey: ["master-tagihan", currentPage, currentLimit, currentSearch],
+    queryKey: ["master-tagihan", currentPage, currentLimit, currentSearch, filterJenjang, filterJenis],
     queryFn: async () => {
       const query = supabase
         .from("master_tagihan")
@@ -34,6 +54,9 @@ export default function MenuManagement() {
       if (currentSearch) {
         query.or(`namatagihan.ilike.%${currentSearch}%,jenjang.ilike.%${currentSearch}%`);
       }
+      // FIX: filter Jenjang & Jenis Tagihan
+      if (filterJenjang !== "semua") query.eq("jenjang", filterJenjang);
+      if (filterJenis !== "semua") query.eq("jenistagihan", filterJenis);
 
       const result = await query;
       if (result.error) toast.error("Gagal memuat data", { description: result.error.message });
@@ -113,8 +136,28 @@ export default function MenuManagement() {
           <h1 className="text-2xl font-bold">Master Tagihan</h1>
           <p className="text-sm text-muted-foreground">Kelola jenis tagihan</p>
         </div>
-        <div className="flex gap-2">
-          <Input placeholder="Cari nama tagihan..." onChange={(e) => handleChangeSearch(e.target.value)} />
+        <div className="flex flex-wrap gap-2">
+          <Input
+            placeholder="Cari nama tagihan..."
+            className="w-full sm:w-56"
+            onChange={(e) => handleChangeSearch(e.target.value)}
+          />
+          <Select value={filterJenjang} onValueChange={setFilterJenjang}>
+            <SelectTrigger className="w-full sm:w-[150px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {JENJANG_FILTER_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={filterJenis} onValueChange={setFilterJenis}>
+            <SelectTrigger className="w-full sm:w-[150px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {JENIS_FILTER_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Dialog>
             <DialogTrigger asChild>
               <Button className="bg-green-600 hover:bg-green-700">

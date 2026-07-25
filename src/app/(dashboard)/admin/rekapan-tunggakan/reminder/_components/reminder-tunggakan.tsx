@@ -65,7 +65,7 @@ export default function ReminderTunggakan() {
           bulan,
           tahun,
           siswa:siswa!idsiswa(id, namasiswa, kelas, nowa),
-          master_tagihan:master_tagihan!idmastertagihan(namatagihan)
+          namatagihan
         `)
         .in("statuspembayaran", ["BELUM BAYAR", "BELUM LUNAS"])
         .order("tahun", { ascending: true })
@@ -91,7 +91,7 @@ export default function ReminderTunggakan() {
 
     (rawData || []).forEach((item: any) => {
       const siswa = first(item.siswa);
-      const master = first(item.master_tagihan);
+      // FIX: baca dari kolom snapshot langsung (item.namatagihan)
       if (!siswa?.id) return;
 
       const sisa = Math.max(
@@ -100,7 +100,7 @@ export default function ReminderTunggakan() {
       );
       if (sisa <= 0) return;
 
-      const label = `${master?.namatagihan || "Tagihan"} ${BULAN_SINGKAT[item.bulan] || item.bulan} ${item.tahun}`;
+      const label = `${item.namatagihan || "Tagihan"} ${BULAN_SINGKAT[item.bulan] || item.bulan} ${item.tahun}`;
 
       if (!map.has(siswa.id)) {
         map.set(siswa.id, {

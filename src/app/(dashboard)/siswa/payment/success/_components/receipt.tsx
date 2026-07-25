@@ -81,7 +81,7 @@ export default function Receipt({
             <tbody>
               <tr className="border-b border-gray-300">
                 <td className="text-gray-600 py-2 w-40">Jenis Tagihan</td>
-                <td className="font-semibold py-2">: {tagihan?.master_tagihan?.namatagihan}</td>
+                <td className="font-semibold py-2">: {tagihan?.namatagihan}</td>
               </tr>
               <tr className="border-b border-gray-300">
                 <td className="text-gray-600 py-2">Total Tagihan</td>

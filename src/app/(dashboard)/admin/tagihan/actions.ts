@@ -3,11 +3,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { writeChangelog } from "@/lib/changelog";
 import { revalidatePath } from "next/cache";
-import {
-  syncRekapanSetelahPembayaran,
-  seedRekapanTunggakanBaru,
-  hapusRekapanTunggakan,
-} from "@/lib/rekapan-helper";
 
 const first = (v: any) => (Array.isArray(v) ? v[0] : v);
 
@@ -23,8 +18,8 @@ async function getTagihanPermission(supabase: any, idTagihan: string) {
       statuspembayaran,
       jumlahtagihan,
       jumlahterbayar,
+      namatagihan,
       siswa:siswa!idsiswa(namasiswa),
-      master_tagihan:master_tagihan!idmastertagihan(namatagihan),
       pembayaran (
         idpembayaran,
         statuspembayaran,
@@ -176,22 +171,8 @@ export async function bayarTagihanManual(prevState: any, formData: FormData) {
     console.error("[bayarTagihanManual] Error insert pembayaran:", insertError);
   }
 
-  // FIX (arahan dosen pembimbing): snapshot ke rekapan_pembayaran +
-  // sinkronkan rekapan_tunggakan setiap ada pembayaran manual sukses.
-  if (pembayaranData?.idpembayaran) {
-    await syncRekapanSetelahPembayaran(supabase, {
-      idpembayaran: pembayaranData.idpembayaran,
-      idtagihansiswa: parseInt(idTagihan),
-      jumlahdibayar: jumlahBayar,
-      tanggalpembayaran: new Date().toISOString(),
-      metodepembayaran: tipePembayaran,
-      sisaSetelahTransaksiIni: sisaSetelahIni,
-      statusTagihanTerbaru: statusBaru,
-    });
-  }
-
   const namaSiswa = first(tagihan.siswa)?.namasiswa || "-";
-  const namaTagihan = first(tagihan.master_tagihan)?.namatagihan || "-";
+  const namaTagihan = tagihan.namatagihan || "-";
 
   await writeChangelog({
     supabase,
@@ -204,7 +185,6 @@ export async function bayarTagihanManual(prevState: any, formData: FormData) {
 
   revalidatePath("/admin/tagihan");
   revalidatePath("/admin/rekapan-pembayaran");
-  revalidatePath("/admin/rekapan-tunggakan");
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
@@ -268,7 +248,7 @@ export async function deleteTagihanSiswa(prevState: any, formData: FormData) {
 
   const tagihan: any = perm.tagihan;
   const namaSiswa = first(tagihan.siswa)?.namasiswa || "-";
-  const namaTagihan = first(tagihan.master_tagihan)?.namatagihan || "-";
+  const namaTagihan = tagihan.namatagihan || "-";
 
   await supabase
     .from("whatsapp_notification_logs")
@@ -317,10 +297,6 @@ export async function deleteTagihanSiswa(prevState: any, formData: FormData) {
     };
   }
 
-  // FIX: bersihkan juga baris snapshot-nya di rekapan_tunggakan (kalau
-  // ada) — tagihannya sendiri sudah tidak ada lagi.
-  await hapusRekapanTunggakan(supabase, parseInt(idTagihan));
-
   await writeChangelog({
     supabase,
     namamenu: "Tagihan Siswa",
@@ -329,7 +305,6 @@ export async function deleteTagihanSiswa(prevState: any, formData: FormData) {
   });
 
   revalidatePath("/admin/tagihan");
-  revalidatePath("/admin/rekapan-tunggakan");
   return { status: "success" };
 }
 
@@ -414,6 +389,17 @@ export async function createTagihanBatch(
     jumlahtagihan: masterTagihan.nominal,
     jumlahterbayar: 0,
     statuspembayaran: "BELUM BAYAR",
+    // FIX (bug yang kamu laporkan): "namatagihan" & "jenjang" di-SNAPSHOT
+    // ke tagihan_siswa saat diterbitkan, persis seperti "jumlahtagihan"
+    // yang sudah lebih dulu independen dari master_tagihan. Begitu
+    // tagihan ini dibuat, dia "berdiri sendiri" — kalau Master Tagihan-nya
+    // diedit belakangan (ganti nama/jenjang), tagihan yang SUDAH
+    // diterbitkan TIDAK ikut berubah.
+    namatagihan: masterTagihan.namatagihan,
+    jenjang: masterTagihan.jenjang,
+    // FIX: jenistagihan (Reguler/Subsidi) ikut di-snapshot juga sekarang,
+    // pola yang sama persis dengan namatagihan/jenjang.
+    jenistagihan: masterTagihan.jenistagihan,
   }));
 
   const { data: insertedTagihan, error: insertError } = await supabase
@@ -428,18 +414,6 @@ export async function createTagihanBatch(
     };
   }
 
-  // FIX (arahan dosen pembimbing): seed rekapan_tunggakan untuk tiap
-  // tagihan yang baru dibuat — langsung muncul sebagai tunggakan (status
-  // BELUM BAYAR, sisa = nominal penuh) sejak awal, tidak perlu nunggu ada
-  // cicilan dulu baru muncul di rekapan.
-  if (insertedTagihan?.length) {
-    await Promise.allSettled(
-      insertedTagihan.map((t: any) =>
-        seedRekapanTunggakanBaru(supabase, t.idtagihansiswa, parseFloat(masterTagihan.nominal))
-      )
-    );
-  }
-
   await writeChangelog({
     supabase,
     namamenu: "Tagihan Siswa",
@@ -448,7 +422,6 @@ export async function createTagihanBatch(
   });
 
   revalidatePath("/admin/tagihan");
-  revalidatePath("/admin/rekapan-tunggakan");
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 

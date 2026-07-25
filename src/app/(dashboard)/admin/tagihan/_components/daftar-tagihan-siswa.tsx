@@ -116,11 +116,10 @@ export default function DaftarTagihanSiswa() {
       let query = supabase
         .from("tagihan_siswa")
         .select(
-          // Kolom "Periode Ditagihkan" diambil dari `bulan`/`tahun` yang
-          // sudah otomatis ikut ter-select lewat `*` (kolom tagihan_siswa
-          // itu sendiri) — tidak butuh join tambahan.
+          // FIX: namatagihan, jenjang, DAN jenistagihan sekarang semuanya
+          // dibaca dari kolom SNAPSHOT di tagihan_siswa sendiri — join ke
+          // master_tagihan sudah tidak diperlukan lagi sama sekali di sini.
           `*, siswa!idsiswa(id, namasiswa, kelas),
-          master_tagihan!idmastertagihan(id_mastertagihan, namatagihan, jenjang, jenistagihan),
           pembayaran(idpembayaran, statuspembayaran, metodepembayaran)`,
           { count: "exact" }
         );
@@ -130,7 +129,7 @@ export default function DaftarTagihanSiswa() {
 
       if (currentSearch) {
         query = query.or(
-          `siswa.namasiswa.ilike.%${currentSearch}%,master_tagihan.namatagihan.ilike.%${currentSearch}%`
+          `siswa.namasiswa.ilike.%${currentSearch}%,namatagihan.ilike.%${currentSearch}%`
         );
       }
 
@@ -178,9 +177,11 @@ export default function DaftarTagihanSiswa() {
           <p className="text-xs text-muted-foreground">{item.siswa?.kelas || ""}</p>
         </div>,
         <div key={`tagihan-${item.idtagihansiswa}`}>
-          <p className="font-semibold">{item.master_tagihan?.namatagihan || "-"}</p>
+          {/* FIX: baca dari kolom snapshot langsung (item.namatagihan,
+              item.jenjang), bukan lagi item.master_tagihan?.* */}
+          <p className="font-semibold">{item.namatagihan || "-"}</p>
           <p className="text-xs text-muted-foreground">
-            {item.bulan}/{item.tahun} · {item.master_tagihan?.jenjang || ""}
+            {item.bulan}/{item.tahun} · {item.jenjang || ""}
           </p>
         </div>,
         <span key={`nominal-${item.idtagihansiswa}`} className="font-semibold">

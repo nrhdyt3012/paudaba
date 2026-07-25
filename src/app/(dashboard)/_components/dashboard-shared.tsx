@@ -174,8 +174,9 @@ export default function DashboardShared() {
           bulan,
           tahun,
           createdat,
-          siswa:siswa!idsiswa(id, namasiswa, kelas, nowa, nis),
-          master_tagihan:master_tagihan!idmastertagihan(namatagihan, jenjang, jenistagihan)
+          namatagihan,
+          jenjang,
+          siswa:siswa!idsiswa(id, namasiswa, kelas, nowa, nis)
         `)
         .in("statuspembayaran", STATUS_TUNGGAKAN)
         .order("createdat", { ascending: false });
@@ -197,7 +198,8 @@ export default function DashboardShared() {
     return (daftarTunggakan || []).filter((item: any) => {
       const nama = item.siswa?.namasiswa?.toLowerCase() || "";
       const kelas = item.siswa?.kelas?.toLowerCase() || "";
-      const tagihan = item.master_tagihan?.namatagihan?.toLowerCase() || "";
+      // FIX: baca dari kolom snapshot langsung (item.namatagihan)
+      const tagihan = item.namatagihan?.toLowerCase() || "";
       return nama.includes(q) || kelas.includes(q) || tagihan.includes(q);
     });
   }, [daftarTunggakan, searchTunggakan]);
@@ -453,9 +455,9 @@ export default function DashboardShared() {
                       <td className="p-3 font-mono text-sm">#{item.idtagihansiswa}</td>
                       <td className="p-3 font-medium">{item.siswa?.namasiswa || "-"}</td>
                       <td className="p-3">
-                        <div className="font-semibold">{item.master_tagihan?.namatagihan || "-"}</div>
+                        <div className="font-semibold">{item.namatagihan || "-"}</div>
                         <div className="text-xs text-muted-foreground">
-                          {item.bulan}/{item.tahun} · {item.master_tagihan?.jenjang || ""}
+                          {item.bulan}/{item.tahun} · {item.jenjang || ""}
                         </div>
                       </td>
                       <td className="p-3 text-right font-semibold text-red-600">

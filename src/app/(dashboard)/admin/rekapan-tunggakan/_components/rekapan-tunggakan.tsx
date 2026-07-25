@@ -180,8 +180,10 @@ export default function RekapanTunggakan() {
           bulan,
           tahun,
           createdat,
-          siswa:siswa!idsiswa(id, namasiswa, kelas, nowa, nis),
-          master_tagihan:master_tagihan!idmastertagihan(namatagihan, jenjang, jenistagihan)
+          namatagihan,
+          jenjang,
+          jenistagihan,
+          siswa:siswa!idsiswa(id, namasiswa, kelas, nowa, nis)
         `)
         .in("statuspembayaran", STATUS_TUNGGAKAN)
         .eq("bulan", selectedMonth)
@@ -213,7 +215,8 @@ export default function RekapanTunggakan() {
             idtagihansiswa,
             jumlahtagihan,
             jumlahterbayar,
-            master_tagihan:master_tagihan!idmastertagihan(jenjang, jenistagihan)
+            jenjang,
+            jenistagihan
           `)
           .in("statuspembayaran", STATUS_TUNGGAKAN)
           .eq("bulan", m)
@@ -224,8 +227,10 @@ export default function RekapanTunggakan() {
         // bukan menganggap semua tunggakan senilai nominal penuh.
         const breakdown: Record<string, number> = {};
         (data || []).forEach((item: any) => {
-          const jenjang = item.master_tagihan?.jenjang || "Lainnya";
-          const jenis = item.master_tagihan?.jenistagihan || "";
+          // FIX: jenjang & jenistagihan sekarang dari kolom snapshot
+          // langsung (item.jenjang, item.jenistagihan)
+          const jenjang = item.jenjang || "Lainnya";
+          const jenis = item.jenistagihan || "";
           const key = jenis ? `${jenjang} ${jenis}` : jenjang;
           breakdown[key] = (breakdown[key] || 0) + 1;
         });
@@ -272,8 +277,8 @@ export default function RekapanTunggakan() {
       "Nama Siswa": item.siswa?.namasiswa || "-",
       Kelas: item.siswa?.kelas || "-",
       "No. WA Wali": item.siswa?.nowa || "-",
-      "Nama Tagihan": item.master_tagihan?.namatagihan || "-",
-      Jenjang: item.master_tagihan?.jenjang || "-",
+      "Nama Tagihan": item.namatagihan || "-",
+      Jenjang: item.jenjang || "-",
       Bulan: BULAN_NAMA[item.bulan],
       Tahun: item.tahun,
       "Nominal Tagihan": parseFloat(item.jumlahtagihan || 0),
@@ -432,7 +437,7 @@ export default function RekapanTunggakan() {
                       <td className="p-3 font-medium">{item.siswa?.namasiswa || "-"}</td>
                       <td className="p-3">{item.siswa?.kelas || "-"}</td>
                       <td className="p-3">{item.siswa?.nowa || "-"}</td>
-                      <td className="p-3">{item.master_tagihan?.namatagihan || "-"}</td>
+                      <td className="p-3">{item.namatagihan || "-"}</td>
                       {/* FIX poin 3: tampilkan SISA, bukan nominal penuh */}
                       <td className="p-3 text-right font-semibold">
                         {convertIDR(hitungSisa(item))}

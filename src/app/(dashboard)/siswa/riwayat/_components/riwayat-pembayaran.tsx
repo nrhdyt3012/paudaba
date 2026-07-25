@@ -54,12 +54,12 @@ type TagihanItem = {
   tahun: number;
   createdat: string;
   updatedat: string;
-  master_tagihan: {
-    namatagihan: string;
-    jenjang: string;
-    jenistagihan: string;
-    nominal: number;
-  };
+  // FIX: namatagihan & jenjang sekarang kolom SNAPSHOT langsung di
+  // tagihan_siswa (bukan lagi lewat join master_tagihan) — supaya kwitansi
+  // & riwayat tetap menunjukkan nama/jenjang SAAT tagihan itu diterbitkan,
+  // bukan ikut berubah kalau Master Tagihan-nya diedit belakangan.
+  namatagihan: string;
+  jenjang: string;
   pembayaran?: PembayaranItem[];
 };
 
@@ -68,9 +68,7 @@ type SisaTagihanItem = {
   jumlahtagihan: string;
   bulan: number;
   tahun: number;
-  master_tagihan: {
-    namatagihan: string;
-  } | null;
+  namatagihan: string;
 };
 
 export default function RiwayatPembayaran() {
@@ -104,9 +102,8 @@ export default function RiwayatPembayaran() {
           tahun,
           createdat,
           updatedat,
-          master_tagihan:master_tagihan!idmastertagihan(
-            namatagihan, jenjang, jenistagihan, nominal
-          ),
+          namatagihan,
+          jenjang,
           pembayaran(
             idpembayaran,
             jumlahdibayar,
@@ -139,7 +136,7 @@ export default function RiwayatPembayaran() {
           jumlahtagihan,
           bulan,
           tahun,
-          master_tagihan:master_tagihan!idmastertagihan(namatagihan)
+          namatagihan
         `)
         .eq("idsiswa", profile.id)
         .in("statuspembayaran", ["BELUM BAYAR", "BELUM LUNAS"])
@@ -196,7 +193,7 @@ export default function RiwayatPembayaran() {
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter((item) => {
-        const namaTagihan = item.master_tagihan?.namatagihan?.toLowerCase() || "";
+        const namaTagihan = item.namatagihan?.toLowerCase() || "";
         const periode = `${BULAN_NAMA[item.bulan]} ${item.tahun}`.toLowerCase();
         return namaTagihan.includes(q) || periode.includes(q);
       });
@@ -300,9 +297,9 @@ export default function RiwayatPembayaran() {
                         >
                           <td className="p-3">{index + 1}</td>
                           <td className="p-3">
-                            <p className="font-medium">{item.master_tagihan?.namatagihan || "-"}</p>
+                            <p className="font-medium">{item.namatagihan || "-"}</p>
                             <p className="text-xs text-muted-foreground">
-                              #{item.idtagihansiswa} · {item.master_tagihan?.jenjang}
+                              #{item.idtagihansiswa} · {item.jenjang}
                             </p>
                           </td>
                           <td className="p-3">{BULAN_NAMA[item.bulan]} {item.tahun}</td>
@@ -431,7 +428,7 @@ function PrintButtonLaporanMenyeluruh({
         .map((p) => ({
           idpembayaran: p.idpembayaran,
           tanggalpembayaran: p.tanggalpembayaran,
-          namatagihan: tagihan.master_tagihan?.namatagihan || "-",
+          namatagihan: tagihan.namatagihan || "-",
           periode: `${BULAN_NAMA[tagihan.bulan]} ${tagihan.tahun}`,
           totalTagihan: parseFloat(tagihan.jumlahtagihan),
           jumlahDibayar: parseFloat(p.jumlahdibayar || "0"),
@@ -532,7 +529,7 @@ function PrintButtonSingle({
     namaSiswa: siswaData?.namasiswa || siswaData?.namaSiswa || "-",
     kelas: siswaData?.kelas || "-",
     namaWali: siswaData?.namawali || siswaData?.namaWali || "-",
-    namaTagihan: tagihan.master_tagihan?.namatagihan || "-",
+    namaTagihan: tagihan.namatagihan || "-",
     periode: `${BULAN_NAMA[tagihan.bulan]} ${tagihan.tahun}`,
     jumlahDibayar: jumlahBayar,
     totalTagihan,
@@ -544,7 +541,7 @@ function PrintButtonSingle({
       jumlahtagihan: s.jumlahtagihan,
       bulan: s.bulan,
       tahun: s.tahun,
-      namatagihan: s.master_tagihan?.namatagihan || "-",
+      namatagihan: s.namatagihan || "-",
     })),
   };
  
