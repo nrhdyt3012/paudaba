@@ -4,11 +4,6 @@ import { createClient } from "@/lib/supabase/server";
 import { writeChangelog } from "@/lib/changelog";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import {
-  cekSiswaBisaDihapus,
-  pesanTidakBisaDihapus,
-  bersihkanDataTagihanSiswa,
-} from "@/lib/siswa-delete-guard";
 
 // ════════════════════════════════════════════════════════════════════════
 // FIX (Kelola Akun): halaman ini sekarang mengelola 2 jenis akun sekaligus
@@ -26,14 +21,18 @@ import {
 // ini — lihat komentar di komponen bendahara.tsx.
 // ════════════════════════════════════════════════════════════════════════
 
-// FIX (arahan dosen pembimbing): untuk akun Wali Siswa, superadmin di
-// halaman Kelola Akun HANYA boleh mengganti password — edit nama/email/no
-// WA tetap lewat menu Data Siswa (satu-satunya sumber kebenaran untuk data
-// itu). Jadi `updateAkunWali` (full edit) diganti jadi `changePasswordWali`
-// yang cuma menerima `id` + `new_password`.
-const changePasswordWaliSchema = z.object({
+// FIX (permintaan lanjutan): untuk akun Wali Siswa, superadmin sekarang
+// boleh mengubah EMAIL juga (tidak cuma password) — asalkan email baru
+// belum dipakai akun lain (Supabase Auth otomatis menolak kalau bentrok,
+// dan kita tangkap errornya jadi pesan yang ramah). Nama/no WA tetap
+// TIDAK bisa diubah dari sini (tetap lewat menu Data Siswa).
+const updateAkunWaliSchema = z.object({
   id: z.string().min(1),
-  new_password: z.string().min(6, "Password baru minimal 6 karakter"),
+  email: z.string().email("Format email tidak valid"),
+  new_password: z
+    .string()
+    .optional()
+    .refine((v) => !v || v.length >= 6, "Password baru minimal 6 karakter"),
 });
 
 const updateAkunBendaharaSchema = z.object({
@@ -47,12 +46,26 @@ const updateAkunBendaharaSchema = z.object({
     .refine((v) => !v || v.length >= 6, "Password baru minimal 6 karakter"),
 });
 
-// ─── Ganti password akun Wali Siswa (satu-satunya aksi edit yang tersedia
-//     untuk role ini di halaman Kelola Akun) ────────────────────────────────
-export async function changePasswordWali(prevState: any, formData: FormData) {
-  const parsed = changePasswordWaliSchema.safeParse({
+// Helper: deteksi pesan error "email sudah dipakai" dari Supabase Auth dan
+// ubah jadi pesan yang ramah dibaca (dipakai untuk Wali Siswa & Bendahara).
+function pesanErrorAuth(message: string): string {
+  const isDuplicateEmail =
+    message.toLowerCase().includes("already been registered") ||
+    message.toLowerCase().includes("already registered") ||
+    message.toLowerCase().includes("already exists");
+  return isDuplicateEmail
+    ? "Email ini sudah digunakan oleh akun lain. Silakan gunakan email yang berbeda."
+    : message;
+}
+
+// ─── Ubah Email & Password akun Wali Siswa (satu-satunya aksi edit yang
+//     tersedia untuk role ini di halaman Kelola Akun — nama/no WA tetap
+//     lewat menu Data Siswa) ────────────────────────────────────────────────
+export async function updateAkunWali(prevState: any, formData: FormData) {
+  const parsed = updateAkunWaliSchema.safeParse({
     id: formData.get("id"),
-    new_password: formData.get("new_password"),
+    email: formData.get("email"),
+    new_password: formData.get("new_password") || undefined,
   });
 
   if (!parsed.success) {
@@ -66,30 +79,44 @@ export async function changePasswordWali(prevState: any, formData: FormData) {
     };
   }
 
-  const { id, new_password } = parsed.data;
+  const { id, email, new_password } = parsed.data;
   const supabase = await createClient({ isAdmin: true });
 
-  const { error: authError } = await supabase.auth.admin.updateUserById(id, {
-    password: new_password,
-  });
+  const authUpdate: { email?: string; password?: string } = { email };
+  if (new_password) authUpdate.password = new_password;
+
+  const { error: authError } = await supabase.auth.admin.updateUserById(id, authUpdate);
   if (authError) {
     return {
       status: "error",
-      errors: { _form: [`Gagal mengganti password: ${authError.message}`] },
+      errors: { _form: [pesanErrorAuth(authError.message)] },
     };
   }
 
-  const { data: siswaRow } = await supabase
+  // Sinkronkan kolom email di tabel `siswa` juga (dipakai buat tampilan
+  // di Kelola Akun, Data Siswa, dsb — supaya tidak beda dengan email login
+  // yang sebenarnya).
+  const { error: dbError, data: siswaRow } = await supabase
     .from("siswa")
-    .select("namasiswa")
+    .update({ email, updatedat: new Date().toISOString() })
     .eq("id", id)
+    .select("namasiswa")
     .maybeSingle();
+
+  if (dbError) {
+    return {
+      status: "error",
+      errors: { _form: [`Gagal update data: ${dbError.message}`] },
+    };
+  }
 
   await writeChangelog({
     supabase,
     namamenu: "Kelola Akun",
     jenisaksi: "UBAH",
-    deskripsi: `Mengganti password akun Wali Siswa: ${siswaRow?.namasiswa || id}`,
+    deskripsi: `Mengubah akun Wali Siswa: ${siswaRow?.namasiswa || id} — email jadi ${email}${
+      new_password ? ", password diganti" : ""
+    }`,
   });
 
   revalidatePath("/superadmin/bendahara");
@@ -179,7 +206,7 @@ export async function updateAkunBendahara(prevState: any, formData: FormData) {
   if (authError) {
     return {
       status: "error",
-      errors: { _form: [`Gagal update akun: ${authError.message}`] },
+      errors: { _form: [pesanErrorAuth(authError.message)] },
     };
   }
 
@@ -224,34 +251,6 @@ export async function deleteAkun(prevState: any, formData: FormData) {
   }
 
   const supabase = await createClient({ isAdmin: true });
-
-  // FIX: sebelumnya TIDAK ADA pengecekan sama sekali di jalur ini — akun
-  // Wali Siswa yang sudah punya riwayat pembayaran sukses bisa langsung
-  // dihapus dari sini tanpa peringatan apa pun, padahal jalur "Kelola Data
-  // Siswa" sudah dilindungi guard serupa. Sekarang disamakan: cek ke tabel
-  // `pembayaran` (status SUCCESS) — lihat src/lib/siswa-delete-guard.ts.
-  // Guard ini hanya relevan untuk source "wali" (akun Bendahara tidak
-  // punya tagihan/pembayaran yang terikat ke mereka).
-  if (source === "wali") {
-    const { bisaDihapus, jumlahTransaksi } = await cekSiswaBisaDihapus(supabase, id);
-
-    if (!bisaDihapus) {
-      return {
-        status: "error",
-        errors: {
-          _form: [
-            jumlahTransaksi === -1
-              ? "Gagal memverifikasi riwayat pembayaran siswa ini, coba lagi."
-              : pesanTidakBisaDihapus(jumlahTransaksi),
-          ],
-        },
-      };
-    }
-
-    // Aman dihapus — bersihkan dulu tagihan yang belum pernah ada
-    // transaksi jadi, beserta data turunannya.
-    await bersihkanDataTagihanSiswa(supabase, id);
-  }
 
   // Hapus user dari Supabase Auth — baris di tabel `siswa`/`admin` akan
   // ikut terhapus lewat ON DELETE CASCADE (pola yang sama seperti
@@ -317,18 +316,34 @@ export async function createBendahara(prevState: any, formData: FormData) {
   if (authError || !authData.user) {
     return {
       status: "error",
-      errors: { _form: [`Gagal membuat akun: ${authError?.message}`] },
+      errors: { _form: [pesanErrorAuth(authError?.message || "Gagal membuat akun")] },
     };
   }
 
-  const { error: dbError } = await supabase.from("admin").insert({
-    id: authData.user.id,
-    nama,
-    email,
-    nohp: no_hp,
-  });
+  // FIX: trigger `handle_new_user()` di database sudah otomatis insert baris
+  // ke `public.admin` (id, email) begitu user Auth dibuat dengan metadata
+  // role: "admin" — trigger membaca `nama` dari key metadata "name" (bukan
+  // "nama"), jadi kolom `nama` di baris yang dibuat trigger tetap NULL, dan
+  // kolom `nohp` memang tidak diisi trigger sama sekali.
+  // Pakai UPSERT (bukan update biasa) supaya tidak bergantung pada apakah
+  // baris sudah sempat dibuat trigger atau belum — kalau baris dengan id
+  // ini sudah ada, dilengkapi; kalau belum ada, langsung dibuat.
+  const { error: dbError } = await supabase
+    .from("admin")
+    .upsert(
+      {
+        id: authData.user.id,
+        nama,
+        email,
+        nohp: no_hp,
+        updatedat: new Date().toISOString(),
+      },
+      { onConflict: "id" }
+    );
 
   if (dbError) {
+    // Rollback: hapus user Auth yang sudah terlanjur dibuat kalau
+    // pelengkapan data di tabel admin gagal.
     await supabase.auth.admin.deleteUser(authData.user.id);
     return {
       status: "error",

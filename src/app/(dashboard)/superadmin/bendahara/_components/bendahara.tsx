@@ -21,11 +21,11 @@ import DataTable from "@/components/common/data-table";
 import DropdownAction from "@/components/common/dropdown-action";
 import {
   Plus, Search, Loader2, Pencil, Trash2, KeyRound, ShieldCheck, Users,
-  Power, PowerOff,
+  Power, PowerOff, Settings,
 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import {
-  changePasswordWali, updateAkunBendahara, deleteAkun, createBendahara,
+  updateAkunWali, updateAkunBendahara, deleteAkun, createBendahara,
   toggleAkunStatus,
 } from "../actions";
 
@@ -181,14 +181,14 @@ export default function BendaharaManagement() {
     <DropdownAction
       key={`act-${item.id}`}
       menu={[
-        // FIX (arahan dosen pembimbing): untuk Wali Siswa, satu-satunya
-        // aksi edit yang tersedia di sini adalah GANTI PASSWORD — edit
-        // nama/email/no WA tetap lewat menu Data Siswa.
+        // FIX (permintaan lanjutan): untuk Wali Siswa, sekarang bisa ubah
+        // EMAIL juga (tidak cuma password) — nama/no WA tetap lewat menu
+        // Data Siswa.
         item.source === "wali"
           ? {
               label: (
                 <span className="flex items-center gap-2 text-green-600">
-                  <KeyRound className="w-4 h-4" /> Ganti Password
+                  <Settings className="w-4 h-4" /> Ubah Email &amp; Password
                 </span>
               ),
               action: () => setSelectedAction({ data: item, type: "ganti-password" }),
@@ -260,9 +260,9 @@ export default function BendaharaManagement() {
       <p className="text-xs text-muted-foreground flex items-center gap-1.5">
         <Users className="w-3.5 h-3.5" />
         Akun baru untuk <strong>Wali Siswa</strong> dibuat lewat menu{" "}
-        <strong>Data Siswa</strong>. Untuk akun Wali Siswa, halaman ini hanya
-        bisa <strong>ganti password</strong>, <strong>nonaktifkan/aktifkan</strong>,
-        atau <strong>hapus</strong> — edit nama/email/no WA tetap lewat Data Siswa.
+        <strong>Data Siswa</strong>. Untuk akun Wali Siswa, halaman ini bisa
+        mengubah <strong>email &amp; password</strong>, <strong>nonaktifkan/aktifkan</strong>,
+        atau <strong>hapus</strong> — nama &amp; no WA tetap lewat Data Siswa.
       </p>
 
       <DataTable
@@ -367,7 +367,7 @@ function DialogCreateBendahara({
   );
 }
 
-// ─── Dialog: Ganti Password (khusus Wali Siswa) ──────────────────────────────
+// ─── Dialog: Ubah Email & Password (khusus Wali Siswa) ───────────────────────
 function DialogGantiPasswordWali({
   open, currentData, handleChangeAction, refetch,
 }: {
@@ -376,26 +376,34 @@ function DialogGantiPasswordWali({
   handleChangeAction: (open: boolean) => void;
   refetch: () => void;
 }) {
-  const form = useForm({ defaultValues: { new_password: "" } });
+  const form = useForm({ defaultValues: { email: "", new_password: "" } });
   const [isPending, setIsPending] = useState(false);
+  const [showPassInput, setShowPassInput] = useState(false);
 
+  // FIX: begitu dialog dibuka, email ke-prefill dari data yang ada
+  // (tidak kosongan) — password tetap kosong (cuma diisi kalau memang
+  // mau diganti).
   useEffect(() => {
-    if (open) form.reset({ new_password: "" });
-  }, [open]);
+    if (open && currentData) {
+      form.reset({ email: currentData.email, new_password: "" });
+      setShowPassInput(false);
+    }
+  }, [open, currentData]);
 
   const onSubmit = form.handleSubmit(async (data) => {
     if (!currentData) return;
     setIsPending(true);
     const formData = new FormData();
     formData.append("id", currentData.id);
-    formData.append("new_password", data.new_password);
-    const state = await changePasswordWali({}, formData);
+    formData.append("email", data.email);
+    if (data.new_password) formData.append("new_password", data.new_password);
+    const state = await updateAkunWali({}, formData);
     setIsPending(false);
 
     if (state.status === "error") {
-      toast.error("Gagal mengganti password", { description: state.errors?._form?.[0] });
+      toast.error("Gagal menyimpan perubahan", { description: state.errors?._form?.[0] });
     } else {
-      toast.success(`Password akun ${currentData.namaAkun} berhasil diganti`);
+      toast.success(`Akun ${currentData.namaAkun} berhasil diperbarui`);
       handleChangeAction(false);
       refetch();
     }
@@ -407,25 +415,48 @@ function DialogGantiPasswordWali({
         <Form {...form}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <KeyRound className="w-5 h-5 text-green-600" />
-              Ganti Password
+              <Settings className="w-5 h-5 text-green-600" />
+              Ubah Email &amp; Password
             </DialogTitle>
             <DialogDescription>
-              Akun Wali Siswa: <strong>{currentData?.namaAkun}</strong> ({currentData?.email})
+              Akun Wali Siswa: <strong>{currentData?.namaAkun}</strong>
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={onSubmit} className="space-y-3">
+            {/* FIX: email sekarang bisa diubah — Supabase Auth otomatis
+                menolak kalau email baru sudah dipakai akun lain, dan
+                pesan errornya sudah dibuat ramah dibaca di actions.ts. */}
             <FormInput
               form={form}
-              name="new_password"
-              label="Password Baru"
-              placeholder="Minimal 6 karakter"
-              type="password"
+              name="email"
+              label="Email"
+              placeholder="email@example.com"
+              type="email"
             />
+
+            {!showPassInput ? (
+              <button
+                type="button"
+                onClick={() => setShowPassInput(true)}
+                className="flex items-center gap-2 text-sm text-green-600 hover:underline"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                Ganti password akun ini juga
+              </button>
+            ) : (
+              <FormInput
+                form={form}
+                name="new_password"
+                label="Password Baru"
+                placeholder="Kosongkan kalau tidak ingin ganti"
+                type="password"
+              />
+            )}
+
             <DialogFooter>
               <DialogClose asChild><Button variant="outline" disabled={isPending}>Batal</Button></DialogClose>
               <Button type="submit" disabled={isPending} className="bg-green-600 hover:bg-green-700">
-                {isPending ? <Loader2 className="animate-spin w-4 h-4" /> : "Ganti Password"}
+                {isPending ? <Loader2 className="animate-spin w-4 h-4" /> : "Simpan Perubahan"}
               </Button>
             </DialogFooter>
           </form>
