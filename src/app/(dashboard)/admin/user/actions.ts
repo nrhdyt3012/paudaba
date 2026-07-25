@@ -5,6 +5,11 @@ import { writeChangelog } from "@/lib/changelog";
 import { AuthFormState } from "@/types/auth";
 import { createUserSchema, updateUserSchema } from "@/validations/auth-validation";
 import { revalidatePath } from "next/cache";
+import {
+  cekSiswaBisaDihapus,
+  pesanTidakBisaDihapus,
+  bersihkanDataTagihanSiswa,
+} from "@/lib/siswa-delete-guard";
 
 // ─── Create User ──────────────────────────────────────────────────────────────
 export async function createUser(prevState: AuthFormState, formData: FormData) {
@@ -53,21 +58,12 @@ export async function createUser(prevState: AuthFormState, formData: FormData) {
     },
   });
 
-if (authError) {
-  const isDuplicateEmail =
-    authError.message.toLowerCase().includes("already been registered") ||
-    authError.message.toLowerCase().includes("already registered") ||
-    authError.code === "email_exists";
-
-  const message = isDuplicateEmail
-    ? "Email ini sudah terdaftar oleh akun lain. Silakan gunakan alamat email yang berbeda."
-    : authError.message;
-
-  return {
-    status: "error",
-    errors: { ...prevState?.errors, _form: [message] },
-  };
-}
+  if (authError) {
+    return {
+      status: "error",
+      errors: { ...prevState?.errors, _form: [authError.message] },
+    };
+  }
 
   if (data?.user) {
     const { error: insertError } = await supabase.from("siswa").upsert({
@@ -220,6 +216,31 @@ export async function deleteUser(prevState: AuthFormState, formData: FormData) {
     .maybeSingle();
 
   const namaSiswa = siswaData?.namasiswa || userId;
+
+  // FIX: guard sebelumnya (patch #8) mengecek `tagihan_siswa` secara umum —
+  // terlalu ketat, karena tagihan yang belum pernah dibayar sepeser pun
+  // sebenarnya aman ikut terhapus. Sekarang dicek ke tabel `pembayaran`
+  // (status SUCCESS) — representasi uang yang benar-benar sudah masuk,
+  // bukan sekadar invoice kosong. Lihat src/lib/siswa-delete-guard.ts.
+  const { bisaDihapus, jumlahTransaksi } = await cekSiswaBisaDihapus(supabase, userId);
+
+  if (!bisaDihapus) {
+    return {
+      status: "error",
+      errors: {
+        _form: [
+          jumlahTransaksi === -1
+            ? "Gagal memverifikasi riwayat pembayaran siswa ini, coba lagi."
+            : pesanTidakBisaDihapus(jumlahTransaksi),
+        ],
+      },
+    };
+  }
+
+  // Aman dihapus (belum pernah ada pembayaran sukses) — bersihkan dulu
+  // tagihan (yang masih "BELUM BAYAR"/belum ada transaksi jadi) beserta
+  // data turunannya, supaya tidak ada baris yatim (orphan) tersisa.
+  await bersihkanDataTagihanSiswa(supabase, userId);
 
   const { error } = await supabase.auth.admin.deleteUser(userId);
 

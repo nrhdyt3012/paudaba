@@ -4,6 +4,11 @@ import { createClient } from "@/lib/supabase/server";
 import { writeChangelog } from "@/lib/changelog";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import {
+  cekSiswaBisaDihapus,
+  pesanTidakBisaDihapus,
+  bersihkanDataTagihanSiswa,
+} from "@/lib/siswa-delete-guard";
 
 // ════════════════════════════════════════════════════════════════════════
 // FIX (Kelola Akun): halaman ini sekarang mengelola 2 jenis akun sekaligus
@@ -220,6 +225,34 @@ export async function deleteAkun(prevState: any, formData: FormData) {
 
   const supabase = await createClient({ isAdmin: true });
 
+  // FIX: sebelumnya TIDAK ADA pengecekan sama sekali di jalur ini — akun
+  // Wali Siswa yang sudah punya riwayat pembayaran sukses bisa langsung
+  // dihapus dari sini tanpa peringatan apa pun, padahal jalur "Kelola Data
+  // Siswa" sudah dilindungi guard serupa. Sekarang disamakan: cek ke tabel
+  // `pembayaran` (status SUCCESS) — lihat src/lib/siswa-delete-guard.ts.
+  // Guard ini hanya relevan untuk source "wali" (akun Bendahara tidak
+  // punya tagihan/pembayaran yang terikat ke mereka).
+  if (source === "wali") {
+    const { bisaDihapus, jumlahTransaksi } = await cekSiswaBisaDihapus(supabase, id);
+
+    if (!bisaDihapus) {
+      return {
+        status: "error",
+        errors: {
+          _form: [
+            jumlahTransaksi === -1
+              ? "Gagal memverifikasi riwayat pembayaran siswa ini, coba lagi."
+              : pesanTidakBisaDihapus(jumlahTransaksi),
+          ],
+        },
+      };
+    }
+
+    // Aman dihapus — bersihkan dulu tagihan yang belum pernah ada
+    // transaksi jadi, beserta data turunannya.
+    await bersihkanDataTagihanSiswa(supabase, id);
+  }
+
   // Hapus user dari Supabase Auth — baris di tabel `siswa`/`admin` akan
   // ikut terhapus lewat ON DELETE CASCADE (pola yang sama seperti
   // deleteUser/deleteBendahara sebelumnya).
@@ -288,30 +321,14 @@ export async function createBendahara(prevState: any, formData: FormData) {
     };
   }
 
-  // FIX: trigger `handle_new_user()` di database sudah otomatis insert baris
-  // ke `public.admin` (id, email) begitu user Auth dibuat dengan metadata
-  // role: "admin" — trigger membaca `nama` dari key metadata "name" (bukan
-  // "nama"), jadi kolom `nama` di baris yang dibuat trigger tetap NULL, dan
-  // kolom `nohp` memang tidak diisi trigger sama sekali.
-  // Pakai UPSERT (bukan update biasa) supaya tidak bergantung pada apakah
-  // baris sudah sempat dibuat trigger atau belum — kalau baris dengan id
-  // ini sudah ada, dilengkapi; kalau belum ada, langsung dibuat.
-  const { error: dbError } = await supabase
-    .from("admin")
-    .upsert(
-      {
-        id: authData.user.id,
-        nama,
-        email,
-        nohp: no_hp,
-        updatedat: new Date().toISOString(),
-      },
-      { onConflict: "id" }
-    );
+  const { error: dbError } = await supabase.from("admin").insert({
+    id: authData.user.id,
+    nama,
+    email,
+    nohp: no_hp,
+  });
 
   if (dbError) {
-    // Rollback: hapus user Auth yang sudah terlanjur dibuat kalau
-    // pelengkapan data di tabel admin gagal.
     await supabase.auth.admin.deleteUser(authData.user.id);
     return {
       status: "error",
