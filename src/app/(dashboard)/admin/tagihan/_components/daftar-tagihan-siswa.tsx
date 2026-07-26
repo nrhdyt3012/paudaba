@@ -43,10 +43,16 @@ const KELAS_OPTIONS = [
   { value: "TK B", label: "TK B" },
 ];
 
+// FIX: sebelumnya cuma 2 opsi (Sudah Bayar/Belum Bayar) padahal status
+// yang sebenarnya ada di kolom `statuspembayaran` ada 3: LUNAS, BELUM
+// LUNAS (sudah bayar sebagian/cicilan), dan BELUM BAYAR (belum bayar
+// sama sekali). Sekarang ketiganya jadi opsi filter terpisah, sesuai
+// juga dengan 3 warna badge yang sudah ada di kolom Status tabel.
 const STATUS_OPTIONS = [
   { value: "semua", label: "Semua Status" },
-  { value: "BELUM BAYAR", label: "Belum Bayar" },
   { value: "LUNAS", label: "Sudah Bayar" },
+  { value: "BELUM LUNAS", label: "Belum Lunas" },
+  { value: "BELUM BAYAR", label: "Belum Bayar" },
 ];
 
 function getTagihanPermissions(item: any) {
@@ -100,13 +106,19 @@ export default function DaftarTagihanSiswa() {
     queryFn: async () => {
       const { count: total } = await supabase
         .from("tagihan_siswa").select("*", { count: "exact", head: true });
-      const { count: belumBayar } = await supabase
+      // FIX: nama variabel & label kartu diperbaiki jadi "Belum Lunas"
+      // (dulu ditulis "belumBayar" & kartu berlabel "Belum Bayar")
+      // — angkanya tetap gabungan BELUM BAYAR + BELUM LUNAS seperti
+      // semula, cuma penamaannya yang lebih akurat sekarang. Filter
+      // dropdown Status di atas tetap punya 3 opsi terpisah untuk
+      // drill-down yang lebih detail kalau dibutuhkan.
+      const { count: belumLunas } = await supabase
         .from("tagihan_siswa").select("*", { count: "exact", head: true })
         .in("statuspembayaran", ["BELUM BAYAR", "BELUM LUNAS"]);
       const { count: lunas } = await supabase
         .from("tagihan_siswa").select("*", { count: "exact", head: true })
         .eq("statuspembayaran", "LUNAS");
-      return { total: total || 0, belumBayar: belumBayar || 0, lunas: lunas || 0 };
+      return { total: total || 0, belumLunas: belumLunas || 0, lunas: lunas || 0 };
     },
   });
 
@@ -318,24 +330,28 @@ export default function DaftarTagihanSiswa() {
             <div className="text-2xl font-bold">{stats?.total || 0}</div>
           </CardContent>
         </Card>
-        <Card>
+                <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm">Belum Bayar</CardTitle>
+            <CardTitle className="text-sm">Belum Lunas</CardTitle>
             <AlertCircle className="h-4 w-4 text-red-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">{stats?.belumBayar || 0}</div>
+            <div className="text-2xl font-bold text-red-600">{stats?.belumLunas || 0}</div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm">Lunas</CardTitle>
+            <CardTitle className="text-sm">Sudah Bayar</CardTitle>
             <CheckCircle2 className="h-4 w-4 text-green-500" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-600">{stats?.lunas || 0}</div>
           </CardContent>
         </Card>
+        {/* FIX: nama kartu diperbaiki dari "Belum Bayar" jadi "Belum
+            Lunas" — lebih akurat karena angkanya memang gabungan status
+            BELUM BAYAR dan BELUM LUNAS (bukan cuma yang benar-benar
+            belum bayar sepeser pun). */}
       </div>
 
       <DataTable
