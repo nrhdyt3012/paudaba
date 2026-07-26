@@ -123,18 +123,30 @@ export default function DashboardShared() {
         return { bulanIni: 0, tunggakanBulanIni: 0 };
       }
 
-      let lunasQuery = supabase
-        .from("tagihan_siswa")
-        .select("jumlahtagihan")
-        .eq("bulan", currentMonth)
-        .eq("tahun", currentYear)
-        .eq("statuspembayaran", "LUNAS");
-      if (angkatan !== "semua") lunasQuery = lunasQuery.in("idsiswa", idList);
-      const { data: bulanIniData } = await lunasQuery;
+      // FIX: Hitung pemasukan menggunakan date range seperti di rekapan-pembayaran.tsx
+      // Ambil pembayaran SUCCESS dengan tanggalpembayaran di bulan sekarang
+      const startDate = new Date(currentYear, currentMonth - 1, 1).toISOString();
+      const endDate = new Date(currentYear, currentMonth, 1).toISOString();
+
+      let pemasukanQuery = supabase
+        .from("pembayaran")
+        .select(`
+          jumlahdibayar,
+          tagihan_siswa!inner(idsiswa)
+        `)
+        .eq("statuspembayaran", "SUCCESS")
+        .gte("tanggalpembayaran", startDate)
+        .lt("tanggalpembayaran", endDate);
+      
+      if (angkatan !== "semua") {
+        pemasukanQuery = pemasukanQuery.in("tagihan_siswa.idsiswa", idList);
+      }
+      
+      const { data: bulanIniData } = await pemasukanQuery;
 
       const bulanIni =
         bulanIniData?.reduce(
-          (sum: number, item: any) => sum + parseFloat(item.jumlahtagihan || "0"),
+          (sum: number, item: any) => sum + parseFloat(item.jumlahdibayar || "0"),
           0
         ) || 0;
 

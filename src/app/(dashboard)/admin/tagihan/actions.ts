@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { writeChangelog } from "@/lib/changelog";
+import { hapusRekapanTunggakan } from "@/lib/rekapan-helper";
 import { revalidatePath } from "next/cache";
 
 const first = (v: any) => (Array.isArray(v) ? v[0] : v);
@@ -283,6 +284,10 @@ export async function deleteTagihanSiswa(prevState: any, formData: FormData) {
       };
     }
   }
+
+  // FIX: Hapus snapshot dari rekapan_tunggakan sebelum menghapus tagihan
+  // (untuk menghindari foreign key constraint error)
+  await hapusRekapanTunggakan(supabase, parseInt(idTagihan));
 
   const { error: deleteError } = await supabase
     .from("tagihan_siswa")
