@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { FieldValues, Path, UseFormReturn } from "react-hook-form";
 import {
   FormControl,
@@ -8,6 +9,7 @@ import {
 } from "../ui/form";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
+import { Eye, EyeOff } from "lucide-react";
 
 // FIX: helper format ribuan gaya Indonesia — "700000" -> "700.000".
 // Hanya untuk TAMPILAN; nilai yang benar-benar disimpan di form tetap
@@ -35,6 +37,13 @@ export default function FormInput<T extends FieldValues>({
   // (mis. 700.000), tapi value yang disimpan di form tetap angka murni.
   type?: string;
 }) {
+  // FIX: state show/hide khusus untuk field bertipe "password" — dipakai
+  // untuk toggle ikon mata (Eye/EyeOff). Karena tiap FormInput adalah
+  // instance komponen tersendiri per field, state ini otomatis independen
+  // antar field password yang berbeda (mis. "Password" vs "Password Baru"
+  // di form yang sama tidak akan saling mempengaruhi).
+  const [showPassword, setShowPassword] = useState(false);
+
   return (
     <FormField
       control={form.control}
@@ -71,6 +80,35 @@ export default function FormInput<T extends FieldValues>({
                   autoComplete="off"
                   className="pl-9"
                 />
+              </div>
+            ) : type === "password" ? (
+              // FIX: tambah ikon mata untuk show/hide password. Input
+              // tetap ter-mask (titik-titik) secara default — ikon mata
+              // cuma toggle attribute `type` antara "password" <-> "text"
+              // saat diklik, sesuai standar UX form password pada umumnya.
+              <div className="relative">
+                <Input
+                  {...rest}
+                  value={value ?? ""}
+                  onChange={onChange}
+                  type={showPassword ? "text" : "password"}
+                  placeholder={placeholder}
+                  autoComplete="off"
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  aria-label={showPassword ? "Sembunyikan password" : "Tampilkan password"}
+                >
+                  {showPassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
               </div>
             ) : (
               <Input

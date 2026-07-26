@@ -110,6 +110,55 @@ export async function deleteMenu(prevState: MenuFormState, formData: FormData) {
     .eq("id_mastertagihan", id)
     .maybeSingle();
 
+  // FIX: Cek apakah ada tagihan_siswa yang masih mereferensi master ini
+  const { data: tagihanList } = await supabase
+    .from("tagihan_siswa")
+    .select("idtagihansiswa")
+    .eq("idmastertagihan", id);
+
+  if (tagihanList && tagihanList.length > 0) {
+    // Hapus semua tagihan_siswa yang terkait terlebih dahulu
+    // (beserta data turunannya: pembayaran, rekapan_tunggakan, etc)
+    for (const tagihan of tagihanList) {
+      // Hapus rekapan_tunggakan
+      await supabase
+        .from("rekapan_tunggakan")
+        .delete()
+        .eq("idtagihansiswa", tagihan.idtagihansiswa);
+
+      // Hapus pembayaran yang gagal/pending
+      const { data: pembayaranList } = await supabase
+        .from("pembayaran")
+        .select("idpembayaran")
+        .eq("idtagihansiswa", tagihan.idtagihansiswa);
+
+      if (pembayaranList && pembayaranList.length > 0) {
+        const idPembayaranList = pembayaranList.map((p: any) => p.idpembayaran);
+        await supabase
+          .from("payment_gateway_log")
+          .delete()
+          .in("idpembayaran", idPembayaranList);
+        
+        await supabase
+          .from("pembayaran")
+          .delete()
+          .in("idpembayaran", idPembayaranList);
+      }
+
+      // Hapus log notifikasi WhatsApp
+      await supabase
+        .from("whatsapp_notification_logs")
+        .delete()
+        .eq("target_id", tagihan.idtagihansiswa);
+
+      // Hapus tagihan_siswa itu sendiri
+      await supabase
+        .from("tagihan_siswa")
+        .delete()
+        .eq("idtagihansiswa", tagihan.idtagihansiswa);
+    }
+  }
+
   const { error } = await supabase
     .from("master_tagihan")
     .delete()
@@ -123,7 +172,7 @@ export async function deleteMenu(prevState: MenuFormState, formData: FormData) {
     supabase,
     namamenu: "Master Tagihan",
     jenisaksi: "HAPUS",
-    deskripsi: `Menghapus master tagihan "${existing?.namatagihan || `#${id}`}"`,
+    deskripsi: `Menghapus master tagihan "${existing?.namatagihan || `#${id}`}" dan ${tagihanList?.length || 0} tagihan yang terkait`,
   });
 
   revalidatePath("/admin/menu");

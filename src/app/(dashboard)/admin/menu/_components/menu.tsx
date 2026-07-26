@@ -12,7 +12,7 @@ import useDataTable from "@/hooks/use-data-table";
 import { createClient } from "@/lib/supabase/client";
 import { convertIDR } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowUpDown, Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Menu } from "@/validations/menu-validation";
@@ -21,7 +21,6 @@ import DialogCreateMenu from "./dialog-create-menu";
 import DialogUpdateMenu from "./dialog-update-menu";
 import DialogDeleteMenu from "./dialog-delete-menu";
 
-// FIX: filter Jenjang & Jenis Tagihan (Reguler/Subsidi) baru
 const JENJANG_FILTER_OPTIONS = [
   { value: "semua", label: "Semua Jenjang" },
   { value: "KB", label: "KB" },
@@ -31,9 +30,54 @@ const JENJANG_FILTER_OPTIONS = [
 
 const JENIS_FILTER_OPTIONS = [
   { value: "semua", label: "Semua Jenis" },
-  { value: "Reguler", label: "Reguler" },
-  { value: "Subsidi", label: "Subsidi" },
+  { value: "PPDB", label: "PPDB" },
+  { value: "Daftar Ulang", label: "Daftar Ulang" },
+  { value: "SPP Reguler", label: "SPP Reguler" },
+  { value: "SPP Subsidi", label: "SPP Subsidi" },
 ];
+
+// FIX: 3 opsi pengurutan data
+// - "terbaru": data yang paling baru ditambahkan tampil paling atas
+// - "nama": urut abjad A-Z berdasarkan namatagihan
+// - "jenjang": KB -> TK A -> TK B. Kebetulan urutan alfabet biasa untuk
+//   3 nilai ini ("KB" < "TK A" < "TK B") sudah persis sesuai urutan
+//   jenjang yang diinginkan (K sebelum T, lalu A sebelum B), jadi cukup
+//   ascending biasa tanpa perlu CASE/urutan custom.
+const SORT_OPTIONS = [
+  { value: "terbaru", label: "Terbaru Ditambahkan" },
+  { value: "nama", label: "Nama (A-Z)" },
+  { value: "jenjang", label: "Jenjang (KB, TK A, TK B)" },
+];
+
+function applyJenisFilter(query: any, filterJenis: string) {
+  if (filterJenis === "PPDB") {
+    return query.ilike("namatagihan", "%PPDB%");
+  }
+  if (filterJenis === "Daftar Ulang") {
+    return query.ilike("namatagihan", "%Daftar Ulang%");
+  }
+  if (filterJenis === "SPP Reguler") {
+    return query.ilike("namatagihan", "%SPP%").ilike("namatagihan", "%Reguler%");
+  }
+  if (filterJenis === "SPP Subsidi") {
+    return query.ilike("namatagihan", "%SPP%").ilike("namatagihan", "%Subsidi%");
+  }
+  return query;
+}
+
+// FIX: helper terpisah untuk urutan, supaya queryFn tidak numpuk logic
+function applySort(query: any, sortBy: string) {
+  if (sortBy === "nama") {
+    return query.order("namatagihan", { ascending: true });
+  }
+  if (sortBy === "jenjang") {
+    return query
+      .order("jenjang", { ascending: true })
+      .order("namatagihan", { ascending: true }); // urutan kedua sbg tie-breaker dalam jenjang yang sama
+  }
+  // default: "terbaru"
+  return query.order("created_at", { ascending: false });
+}
 
 export default function MenuManagement() {
   const supabase = createClient();
@@ -41,22 +85,25 @@ export default function MenuManagement() {
 
   const [filterJenjang, setFilterJenjang] = useState("semua");
   const [filterJenis, setFilterJenis] = useState("semua");
+  const [sortBy, setSortBy] = useState("terbaru");
 
   const { data: menus, isLoading, refetch } = useQuery({
-    queryKey: ["master-tagihan", currentPage, currentLimit, currentSearch, filterJenjang, filterJenis],
+    queryKey: ["master-tagihan", currentPage, currentLimit, currentSearch, filterJenjang, filterJenis, sortBy],
     queryFn: async () => {
-      const query = supabase
+      let query = supabase
         .from("master_tagihan")
         .select("*", { count: "exact" })
-        .range((currentPage - 1) * currentLimit, currentPage * currentLimit - 1)
-        .order("created_at", { ascending: false });
+        .range((currentPage - 1) * currentLimit, currentPage * currentLimit - 1);
+
+      query = applySort(query, sortBy);
 
       if (currentSearch) {
-        query.or(`namatagihan.ilike.%${currentSearch}%,jenjang.ilike.%${currentSearch}%`);
+        query = query.or(`namatagihan.ilike.%${currentSearch}%,jenjang.ilike.%${currentSearch}%`);
       }
-      // FIX: filter Jenjang & Jenis Tagihan
-      if (filterJenjang !== "semua") query.eq("jenjang", filterJenjang);
-      if (filterJenis !== "semua") query.eq("jenistagihan", filterJenis);
+
+      if (filterJenjang !== "semua") query = query.eq("jenjang", filterJenjang);
+
+      if (filterJenis !== "semua") query = applyJenisFilter(query, filterJenis);
 
       const result = await query;
       if (result.error) toast.error("Gagal memuat data", { description: result.error.message });
@@ -70,9 +117,6 @@ export default function MenuManagement() {
   const filteredData = useMemo(() => {
     return (menus?.data || []).map((item: any, index: number) => [
       currentLimit * (currentPage - 1) + index + 1,
-      // FIX: description dipindah keluar dari sini (dulu numpang jadi
-      // subtext di bawah nama), sekarang jadi kolom "Keterangan" sendiri
-      // di bagian bawah.
       <p key={`nama-${item.id_mastertagihan}`} className="font-semibold">
         {item.namatagihan}
       </p>,
@@ -82,9 +126,6 @@ export default function MenuManagement() {
       <span key={`nominal-${item.id_mastertagihan}`} className="font-semibold">
         {convertIDR(parseFloat(item.nominal || 0))}
       </span>,
-      // FIX: kolom "Jenis Tagihan" (badge Reguler/Subsidi) DIHAPUS — sudah
-      // otomatis kebaca dari Nama Tagihan yang di-generate, jadi kolom
-      // terpisah untuk itu redundan.
       <span key={`keterangan-${item.id_mastertagihan}`} className="text-sm text-muted-foreground">
         {item.description || "-"}
       </span>,
@@ -151,9 +192,21 @@ export default function MenuManagement() {
             </SelectContent>
           </Select>
           <Select value={filterJenis} onValueChange={setFilterJenis}>
-            <SelectTrigger className="w-full sm:w-[150px]"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-full sm:w-[170px]"><SelectValue /></SelectTrigger>
             <SelectContent>
               {JENIS_FILTER_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {/* FIX: dropdown Sortir baru */}
+          <Select value={sortBy} onValueChange={setSortBy}>
+            <SelectTrigger className="w-full sm:w-[210px]">
+              <ArrowUpDown className="w-3.5 h-3.5 mr-1.5 text-muted-foreground" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SORT_OPTIONS.map((opt) => (
                 <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
               ))}
             </SelectContent>

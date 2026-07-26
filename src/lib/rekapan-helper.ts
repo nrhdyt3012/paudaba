@@ -154,6 +154,7 @@ export async function hapusRekapanTunggakan(
 
   if (error) {
     console.error("[rekapan-helper] Gagal hapus rekapan_tunggakan:", error.message);
+    throw new Error(`Gagal menghapus data tunggakan: ${error.message}`);
   }
 }
 
