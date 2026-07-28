@@ -21,6 +21,7 @@ import { useReactToPrint } from "react-to-print";
 import KwitansiTemplate, { KwitansiData } from "@/components/common/kwitansi-template";
 import LaporanRiwayatTemplate, {
   LaporanRiwayatData,
+  TagihanBelumLunasItem,
 } from "@/components/common/laporan-riwayat-template";
 import { generateQrCodeDataUrl } from "@/lib/kwitansi-helper";
 
@@ -403,7 +404,8 @@ export default function RiwayatPembayaran() {
   );
 }
 
-// ─── Tombol cetak laporan riwayat MENYELURUH (semua tagihan digabung) ───────
+// ─── Tombol cetak laporan tagihan MENYELURUH (riwayat pembayaran + rincian
+// tagihan yang belum lunas) ─────────────────────────────────────────────────
 function PrintButtonLaporanMenyeluruh({
   riwayatList,
   siswaData,
@@ -414,12 +416,12 @@ function PrintButtonLaporanMenyeluruh({
   const contentRef = useRef<HTMLDivElement>(null);
   const handlePrint = useReactToPrint({
     contentRef,
-    documentTitle: `Laporan-Riwayat-${siswaData?.namasiswa || "Siswa"}`,
+    documentTitle: `Laporan-Tagihan-${siswaData?.namasiswa || "Siswa"}`,
   });
 
   const now = new Date();
 
-  // Rangkum SEMUA transaksi dari SEMUA tagihan jadi satu list, urut
+  // Tabel 1: rangkum SEMUA transaksi dari SEMUA tagihan jadi satu list, urut
   // kronologis (paling lama duluan) — persis seperti mutasi rekening.
   const allItems = riwayatList
     .flatMap((tagihan) =>
@@ -445,6 +447,28 @@ function PrintButtonLaporanMenyeluruh({
 
   const totalDibayarKeseluruhan = allItems.reduce((s, it) => s + it.jumlahDibayar, 0);
 
+  // BARU — Tabel 2: rincian tagihan yang statusnya belum LUNAS, diambil dari
+  // data tagihan_siswa TERKINI (bukan dari histori pembayaran), supaya wali
+  // siswa tahu persis sisa tagihan yang masih harus dibayar saat laporan
+  // ini dicetak.
+  const tagihanBelumLunas: TagihanBelumLunasItem[] = riwayatList
+    .filter((t) => t.statuspembayaran !== "LUNAS")
+    .sort((a, b) => (a.tahun * 12 + a.bulan) - (b.tahun * 12 + b.bulan))
+    .map((t) => {
+      const total = parseFloat(t.jumlahtagihan);
+      const sudahDibayar = parseFloat(t.jumlahterbayar || "0");
+      return {
+        idtagihansiswa: t.idtagihansiswa,
+        namatagihan: t.namatagihan || "-",
+        periode: `${BULAN_NAMA[t.bulan]} ${t.tahun}`,
+        totalTagihan: total,
+        sudahDibayar,
+        sisaTagihan: Math.max(0, total - sudahDibayar),
+      };
+    });
+
+  const totalSisaBelumLunas = tagihanBelumLunas.reduce((s, t) => s + t.sisaTagihan, 0);
+
   const laporanData: LaporanRiwayatData = {
     namaSiswa: siswaData?.namasiswa || siswaData?.namaSiswa || "-",
     kelas: siswaData?.kelas || "-",
@@ -453,13 +477,15 @@ function PrintButtonLaporanMenyeluruh({
     jamCetak: now.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }).replace(":", ".") + " WIB",
     items: allItems,
     totalDibayarKeseluruhan,
+    tagihanBelumLunas,
+    totalSisaBelumLunas,
   };
 
   return (
     <>
       <Button onClick={handlePrint} variant="outline" className="gap-2">
         <PrinterIcon className="h-4 w-4" />
-        Cetak Laporan Riwayat Menyeluruh
+        Cetak Laporan Tagihan Menyeluruh
       </Button>
       <div className="hidden">
         <div ref={contentRef}>
