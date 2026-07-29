@@ -28,6 +28,7 @@ import {
   updateAkunWali, updateAkunBendahara, deleteAkun, createBendahara,
   toggleAkunStatus,
 } from "../actions";
+import PasswordResetPanel from "./password-reset-panel";
 
 const ITEMS_PER_PAGE = 10;
 
@@ -233,6 +234,7 @@ export default function BendaharaManagement() {
           </p>
         </div>
         <div className="flex flex-col sm:flex-row gap-2">
+          <PasswordResetPanel/>
           <div className="relative">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input

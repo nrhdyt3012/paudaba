@@ -97,6 +97,21 @@ class WhatsAppNotificationService {
           });
           break;
 
+        case 'PASSWORD_RESET_CONFIRM':
+          message = whatsappTemplates.konfirmasiPermintaanResetPassword({
+            recipientName: payload.recipientName,
+            studentName: payload.studentName,
+          });
+          break;
+
+        case 'PASSWORD_RESET_DONE':
+          message = whatsappTemplates.notifikasiPasswordBaruDiset({
+            recipientName: payload.recipientName,
+            studentName: payload.studentName,
+            passwordBaru: payload.data.passwordBaru || '-',
+          });
+          break;
+
         default:
           const _exhaustive: never = payload.messageType;
           throw new Error(`Unknown message type: ${_exhaustive}`);

@@ -60,7 +60,17 @@ export interface FontneWebhookPayload {
 export interface WhatsAppNotificationLog {
   id: number;
   recipient_phone: string;
-  message_type: 'TAGIHAN' | 'PAYMENT_SUCCESS' | 'PAYMENT_FAILED' | 'REMINDER_GABUNGAN';
+  // FIX (fitur lupa password): tambah 'PASSWORD_RESET_CONFIRM' (WA saat
+  // superadmin klik "Konfirmasi ke WA") & 'PASSWORD_RESET_DONE' (WA saat
+  // password baru sudah disimpan) — lihat sql/password_reset_requests.sql
+  // untuk migration enum-nya di database.
+  message_type:
+    | 'TAGIHAN'
+    | 'PAYMENT_SUCCESS'
+    | 'PAYMENT_FAILED'
+    | 'REMINDER_GABUNGAN'
+    | 'PASSWORD_RESET_CONFIRM'
+    | 'PASSWORD_RESET_DONE';
   target_id: number | null;
   message_content: string;
   delivery_status: 'PENDING' | 'SENT' | 'DELIVERED' | 'FAILED';
@@ -74,7 +84,15 @@ export interface NotificationPayload {
   recipientPhone: string;
   // FIX poin 4: tambah 'REMINDER_GABUNGAN' untuk reminder tunggakan yang
   // merangkum beberapa tagihan sekaligus jadi satu pesan per siswa.
-  messageType: 'TAGIHAN' | 'PAYMENT_SUCCESS' | 'PAYMENT_FAILED' | 'REMINDER_GABUNGAN';
+  // FIX (fitur lupa password): tambah 'PASSWORD_RESET_CONFIRM' &
+  // 'PASSWORD_RESET_DONE'.
+  messageType:
+    | 'TAGIHAN'
+    | 'PAYMENT_SUCCESS'
+    | 'PAYMENT_FAILED'
+    | 'REMINDER_GABUNGAN'
+    | 'PASSWORD_RESET_CONFIRM'
+    | 'PASSWORD_RESET_DONE';
   targetId?: number;
   recipientName: string;
   studentName: string;

@@ -5,55 +5,45 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DarkmodeToggle } from "@/components/common/darkmode-toggle";
-import { MessageCircle, ArrowLeft } from "lucide-react";
+import { KeyRound, ArrowLeft, Loader2, CheckCircle2 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
+import { toast } from "sonner";
+import { ajukanResetPassword } from "../actions";
 
-// FIX: forgot password sekarang mengarah ke kontak WhatsApp admin/bendahara
-// (via wa.me, BUKAN Fonnte — wa.me cuma buka aplikasi WhatsApp user sendiri
-// dengan pesan yang sudah terisi otomatis, tidak butuh API key apa pun).
-// Ganti nomor di bawah ini kalau nomor admin/bendahara berubah.
-const ADMIN_WA_NUMBER_RAW = "082229308120";
-
-// wa.me butuh format internasional tanpa angka 0 di depan (62xxxxxxxxxx).
-function toWaFormat(nomor: string): string {
-  const digitsOnly = nomor.replace(/\D/g, "");
-  if (digitsOnly.startsWith("0")) return "62" + digitsOnly.slice(1);
-  if (digitsOnly.startsWith("62")) return digitsOnly;
-  return "62" + digitsOnly;
-}
-
+// FIX (fitur lupa password): form ini sekarang dipakai BERSAMA oleh
+// bendahara & wali siswa, dan cuma minta satu kolom — EMAIL — karena
+// email adalah satu-satunya identitas yang unik per akun (baik role-nya
+// admin/bendahara maupun siswa/wali). Submit TIDAK lagi membuka wa.me;
+// sebaliknya, permintaan masuk ke sistem dan akan muncul di halaman
+// Kelola Akun milik superadmin untuk diproses (lihat actions.ts).
 export default function ForgotPassword() {
-  const [nis, setNis] = useState("");
-  const [namaSiswa, setNamaSiswa] = useState("");
-  const [namaWali, setNamaWali] = useState("");
   const [email, setEmail] = useState("");
-  const [error, setError] = useState("");
+  const [isPending, setIsPending] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
 
-  const handleHubungiWA = () => {
-    if (!nis.trim() || !namaSiswa.trim() || !namaWali.trim()) {
-      setError("NIS, nama siswa, dan nama wali wajib diisi.");
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!email.trim()) {
+      toast.error("Email wajib diisi.");
       return;
     }
-    setError("");
 
-    const nomor = toWaFormat(ADMIN_WA_NUMBER_RAW);
+    setIsPending(true);
+    const formData = new FormData();
+    formData.set("email", email.trim());
 
-    let pesan =
-      `Assalamu'alaikum, saya lupa password akun saya.\n\n` +
-      `NIS Siswa: ${nis}\n` +
-      `Nama Siswa: ${namaSiswa}\n` +
-      `Nama Wali: ${namaWali}\n`;
+    const result = await ajukanResetPassword({}, formData);
+    setIsPending(false);
 
-    if (email.trim()) {
-      pesan += `Email/akun: ${email}\n`;
+    if (result.status === "error") {
+      toast.error(result.message || "Gagal mengirim permintaan.");
+      return;
     }
 
-    pesan += `\nMohon bantuannya untuk reset password. Terima kasih.`;
-
-    const url = `https://wa.me/${nomor}?text=${encodeURIComponent(pesan)}`;
-    window.open(url, "_blank", "noopener,noreferrer");
+    setIsSubmitted(true);
   };
 
   return (
@@ -63,95 +53,83 @@ export default function ForgotPassword() {
         <Image src="/logo.jpg" alt="Logo" width={100} height={100} className="rounded-full shadow-lg" priority />
       </div>
       <Card className="w-full max-w-md shadow-xl">
-        <CardHeader className="text-center space-y-2">
-          <div className="flex justify-center mb-2">
-            <div className="w-12 h-12 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center">
-              <MessageCircle className="w-6 h-6 text-green-600" />
+        {isSubmitted ? (
+          <CardContent className="pt-6">
+            <div className="flex flex-col items-center gap-4 text-center">
+              <div className="w-16 h-16 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center">
+                <CheckCircle2 className="w-10 h-10 text-green-600" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold mb-2">Permintaan Terkirim</h2>
+                <p className="text-muted-foreground text-sm">
+                  Jika email tersebut terdaftar di sistem kami, permintaan
+                  reset password Anda telah kami terima dan akan segera
+                  diproses oleh admin sekolah. Anda akan dihubungi melalui
+                  WhatsApp setelah password baru disiapkan.
+                </p>
+              </div>
+              <Link href="/login" className="w-full">
+                <Button className="w-full bg-blue-600 hover:bg-blue-700">
+                  Kembali ke Login
+                </Button>
+              </Link>
             </div>
-          </div>
-          <CardTitle className="text-2xl">Lupa Password?</CardTitle>
-          <CardDescription>
-            Hubungi admin/bendahara sekolah via WhatsApp untuk bantuan reset
-            password akun Anda.
-          </CardDescription>
-          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
-            Catatan: fitur ini hanya untuk wali siswa yang lupa password akun
-            mereka.
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="nis">NIS Siswa</Label>
-              <Input
-                id="nis"
-                type="text"
-                placeholder="Masukkan NIS siswa"
-                value={nis}
-                onChange={(e) => setNis(e.target.value)}
-              />
-            </div>
+          </CardContent>
+        ) : (
+          <>
+            <CardHeader className="text-center space-y-2">
+              <div className="flex justify-center mb-2">
+                <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center">
+                  <KeyRound className="w-6 h-6 text-blue-600" />
+                </div>
+              </div>
+              <CardTitle className="text-2xl">Lupa Password?</CardTitle>
+              <CardDescription>
+                Masukkan email akun Anda. Admin sekolah akan memproses
+                permintaan reset password Anda.
+              </CardDescription>
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
+                Catatan: fitur ini berlaku untuk akun Bendahara maupun Wali
+                Siswa.
+              </div>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email Akun</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="email@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    disabled={isPending}
+                  />
+                </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="namaSiswa">Nama Siswa</Label>
-              <Input
-                id="namaSiswa"
-                type="text"
-                placeholder="Masukkan nama siswa"
-                value={namaSiswa}
-                onChange={(e) => setNamaSiswa(e.target.value)}
-              />
-            </div>
+                <Button
+                  type="submit"
+                  className="w-full bg-blue-600 hover:bg-blue-700"
+                  disabled={isPending || !email.trim()}
+                >
+                  {isPending ? (
+                    <><Loader2 className="mr-2 w-4 h-4 animate-spin" />Mengirim...</>
+                  ) : (
+                    <><KeyRound className="w-4 h-4 mr-2" />Ajukan Reset Password</>
+                  )}
+                </Button>
 
-            <div className="space-y-2">
-              <Label htmlFor="namaWali">Nama Wali</Label>
-              <Input
-                id="namaWali"
-                type="text"
-                placeholder="Masukkan nama wali"
-                value={namaWali}
-                onChange={(e) => setNamaWali(e.target.value)}
-              />
-            </div>
-
-            {/* <div className="space-y-2">
-              <Label htmlFor="email">Email Akun (opsional)</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="email@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                Isi jika masih ingat, supaya admin lebih cepat menemukan data
-                akun Anda.
-              </p>
-            </div> */}
-
-            {error && (
-              <p className="text-sm text-red-600 dark:text-red-400">
-                {error}
-              </p>
-            )}
-
-            <Button
-              type="button"
-              onClick={handleHubungiWA}
-              className="w-full bg-green-600 hover:bg-green-700"
-            >
-              <MessageCircle className="w-4 h-4 mr-2" />
-              Hubungi via WhatsApp
-            </Button>
-
-            <Link href="/login" className="block">
-              <Button variant="ghost" className="w-full">
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Kembali ke Login
-              </Button>
-            </Link>
-          </div>
-        </CardContent>
+                <Link href="/login" className="block">
+                  <Button variant="ghost" className="w-full" type="button">
+                    <ArrowLeft className="w-4 h-4 mr-2" />
+                    Kembali ke Login
+                  </Button>
+                </Link>
+              </form>
+            </CardContent>
+          </>
+        )}
       </Card>
     </div>
   );

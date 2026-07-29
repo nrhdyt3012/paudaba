@@ -38,6 +38,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -46,6 +47,7 @@ import { toast } from "sonner";
 import { useAuthStore } from "@/stores/auth-store";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -114,6 +116,23 @@ export default function AppSidebar() {
   const isSuperadmin = profile?.role === "superadmin";
   const isAdmin = profile?.role === "admin";
   const isSiswa = profile?.role === "siswa";
+
+  // FIX (fitur lupa password): badge jumlah permintaan reset password yang
+  // masih pending, ditampilkan di menu "Kelola Akun". Polling 15 detik —
+  // cukup untuk kebutuhan ini tanpa perlu Supabase Realtime.
+  const { data: pendingPasswordResetCount } = useQuery({
+    queryKey: ["sidebar-pending-password-reset-count"],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from("password_reset_requests")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "pending");
+      if (error) return 0;
+      return count || 0;
+    },
+    enabled: isSuperadmin,
+    refetchInterval: 15000,
+  });
 
   const mainMenu = isSiswa
     ? SISWA_MENU
@@ -207,6 +226,15 @@ export default function AppSidebar() {
                         <Link href={item.url}>
                           <item.icon />
                           <span>{item.title}</span>
+                          {item.url === "/superadmin/bendahara" &&
+                            !!pendingPasswordResetCount && (
+                              <Badge
+                                variant="destructive"
+                                className="ml-auto h-5 min-w-5 px-1.5 flex items-center justify-center"
+                              >
+                                {pendingPasswordResetCount}
+                              </Badge>
+                            )}
                         </Link>
                       </SidebarMenuButton>
                     </SidebarMenuItem>

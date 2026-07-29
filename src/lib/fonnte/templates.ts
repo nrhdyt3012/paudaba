@@ -224,6 +224,52 @@ Wassalamu'alaikum Wr. Wb.
   },
 
   /**
+   * FIX (fitur lupa password): dikirim saat superadmin klik "Konfirmasi
+   * ke WA" di daftar permintaan reset password — menanyakan ke pemilik
+   * akun apakah benar dia yang mengajukan, sekaligus jadi peringatan dini
+   * kalau ada yang mengatasnamakan dia tanpa sepengetahuannya.
+   */
+  konfirmasiPermintaanResetPassword: (params: MessageTemplateParams): string => {
+    return `🔐 *KONFIRMASI PERMINTAAN RESET PASSWORD*
+
+Assalamu'alaikum Wr. Wb.
+
+Yth. Bapak/Ibu Selaku Wali Siswa dari *${params.recipientName}*
+
+Kami menerima permintaan reset password untuk akun Anda di Sistem Pembayaran KB/TK Aisyiyah Bustanul Athfal 1 Buduran.
+
+Apabila benar Bapak/Ibu yang mengajukan permintaan ini, mohon konfirmasi kepada admin/bendahara sekolah agar password baru dapat segera diproses.
+
+Apabila Bapak/Ibu TIDAK merasa mengajukan permintaan ini, mohon segera hubungi admin/bendahara sekolah untuk melaporkan hal ini demi keamanan akun Anda.
+
+Wassalamu'alaikum Wr. Wb.
+*KB TK Aisyiyah Bustanul Athfal 1 Buduran*`;
+  },
+
+  /**
+   * FIX (fitur lupa password): dikirim setelah superadmin menyimpan
+   * password baru untuk akun tersebut.
+   */
+  notifikasiPasswordBaruDiset: (
+    params: MessageTemplateParams & { passwordBaru: string }
+  ): string => {
+    return `🔑 *PASSWORD AKUN ANDA TELAH DIPERBARUI*
+
+Assalamu'alaikum Wr. Wb.
+
+Yth. Bapak/Ibu Selaku Wali Siswa dari *${params.recipientName}*
+
+Password akun Anda di Sistem Pembayaran KB/TK Aisyiyah Bustanul Athfal 1 Buduran telah diperbarui oleh admin sekolah. Berikut password baru Anda:
+
+*${params.passwordBaru}*
+
+Apabila Bapak/Ibu tidak pernah meminta perubahan ini, segera hubungi admin/bendahara sekolah.
+
+Wassalamu'alaikum Wr. Wb.
+*KB TK Aisyiyah Bustanul Athfal 1 Buduran*`;
+  },
+
+  /**
    * Test Message
    */
   testMessage: (params: MessageTemplateParams): string => {

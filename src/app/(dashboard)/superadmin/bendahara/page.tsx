@@ -1,6 +1,3 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// FILE: src/app/(dashboard)/superadmin/bendahara/page.tsx
-// ─────────────────────────────────────────────────────────────────────────────
 import BendaharaManagement from "./_components/bendahara";
 
 export const metadata = {
