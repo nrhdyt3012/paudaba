@@ -71,6 +71,21 @@ function getAutoTipeSPP(namaTagihan: string): "reguler" | "subsidi" | null {
   return namaTagihan.includes("Subsidi") ? "subsidi" : "reguler";
 }
 
+// FIX: deteksi kelas dari nama master tagihan — kalau namanya mengandung
+// "KB", "TK A", atau "TK B", filter Kelas di Step 3 otomatis diarahkan ke
+// kelas tersebut supaya bendahara tidak perlu pilih manual lagi.
+// Urutan pengecekan penting: "TK A"/"TK B" dicek DULUAN sebelum "KB",
+// karena varian tanpa spasi seperti "TKB" juga mengandung substring "KB"
+// (kalau salah urutan, "TKB" bisa salah kedeteksi jadi kelas "KB").
+function getAutoKelasFromNama(namaTagihan: string): string | null {
+  if (!namaTagihan) return null;
+  const upper = namaTagihan.toUpperCase();
+  if (upper.includes("TK A")) return "TK A";
+  if (upper.includes("TK B") || upper.includes("TKB")) return "TK B";
+  if (upper.includes("KB")) return "KB";
+  return null;
+}
+
 export default function BuatTagihanPage() {
   const supabase = createClient();
   const router = useRouter();
@@ -130,6 +145,7 @@ export default function BuatTagihanPage() {
   }, [masterList, searchMaster]);
 
   const autoTipeSPP = masterSelected ? getAutoTipeSPP(masterSelected.namatagihan) : null;
+  const autoKelas = masterSelected ? getAutoKelasFromNama(masterSelected.namatagihan) : null;
 
   // ─── Auto-fill periode saat master dipilih ────────────────────────────────
   useEffect(() => {
@@ -139,6 +155,7 @@ export default function BuatTagihanPage() {
       setSelectedTahun(tahun);
       setSelectedSiswa([]);
       setFilterTipeSPP(autoTipeSPP ?? "semua");
+      setFilterKelas(autoKelas ?? "semua"); // ← baris baru: auto-set filter kelas
     }
   }, [selectedMaster]);
 
