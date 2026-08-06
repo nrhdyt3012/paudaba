@@ -11,7 +11,14 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { convertIDR } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Download, Calendar, ImageIcon } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Calendar,
+  ImageIcon,
+  Printer,
+} from "lucide-react";
 import { useMemo, useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import {
@@ -26,6 +33,9 @@ import {
   Cell,
 } from "recharts";
 import * as XLSX from "xlsx";
+import { useReactToPrint } from "react-to-print";
+// FIX: sesuaikan path berikut dengan lokasi asli komponen & util di project kamu
+import KwitansiTemplate, { KwitansiData } from "@/components/common/kwitansi-template";
 
 const BULAN_NAMA = [
   "",
@@ -136,6 +146,81 @@ const MonthYearPicker = ({
   );
 };
 
+// ─── Tombol Cetak Kwitansi per transaksi ───────────────────────────────────────
+function PrintButtonRekap({ item }: { item: any }) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
+
+  const tagihan = first(item.tagihan_siswa);
+  const siswa = first(tagihan?.siswa);
+
+  const handlePrint = useReactToPrint({
+    contentRef,
+    documentTitle: `Kwitansi-${item.idtagihansiswa}-Transaksi-${item.idpembayaran}`,
+  });
+
+  const jumlahBayar = parseFloat(item.jumlahdibayar || "0");
+  const totalTagihan = parseFloat(tagihan?.jumlahtagihan || "0");
+  const sisaSetelahIni =
+    item.sisa_setelah_transaksi_ini != null
+      ? Math.max(0, Number(item.sisa_setelah_transaksi_ini))
+      : 0;
+  const isLunas = sisaSetelahIni <= 0;
+
+  const tglBayar = new Date(item.tanggalpembayaran);
+  const noKwitansi = `${item.idtagihansiswa}/${item.idpembayaran}/${tglBayar.getFullYear()}`;
+
+  useEffect(() => {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+    const linkKwitansi = `${appUrl}/kwitansi/${item.idpembayaran}`;
+    // generateQrCodeDataUrl(linkKwitansi).then(setQrCodeDataUrl);
+  }, [item.idpembayaran]);
+
+  const kwitansiData: KwitansiData = {
+    noKwitansi,
+    tanggalCetak: tglBayar.toLocaleDateString("id-ID", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    }),
+    jamCetak:
+      tglBayar
+        .toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
+        .replace(":", ".") + " WIB",
+    namaSiswa: siswa?.namasiswa || "-",
+    kelas: siswa?.kelas || "-",
+    namaWali: siswa?.namawali || "-",
+    namaTagihan: tagihan?.namatagihan || "-",
+    periode: tagihan ? `${BULAN_NAMA[tagihan.bulan]} ${tagihan.tahun}` : "-",
+    jumlahDibayar: jumlahBayar,
+    totalTagihan,
+    sisaTagihan: sisaSetelahIni,
+    isLunas,
+    qrCodeDataUrl,
+    // Catatan: daftar "tagihan lain yang belum lunas" tidak disertakan di sini
+    // karena butuh query tambahan per siswa. Bisa ditambahkan kalau perlu.
+  };
+
+  return (
+    <>
+      <Button
+        onClick={handlePrint}
+        size="sm"
+        variant="outline"
+        className="h-8 gap-1.5"
+      >
+        <Printer className="h-3.5 w-3.5" />
+        Cetak Kwitansi
+      </Button>
+      <div className="hidden">
+        <div ref={contentRef}>
+          <KwitansiTemplate data={kwitansiData} />
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── Komponen Utama ────────────────────────────────────────────────────────────
 export default function RekapanPembayaran() {
   const supabase = createClient();
@@ -179,7 +264,7 @@ export default function RekapanPembayaran() {
             namatagihan,
             jenjang,
             jenistagihan,
-            siswa:siswa!idsiswa(id, namasiswa, kelas)
+            siswa:siswa!idsiswa(id, namasiswa, kelas, namawali)
           )
         `)
         .eq("statuspembayaran", "SUCCESS")
@@ -446,21 +531,22 @@ export default function RekapanPembayaran() {
                         <td className="p-3">
                           {new Date(item.tanggalpembayaran).toLocaleDateString("id-ID")}
                         </td>
-                        {/* FIX: Aksi lihat bukti pembayaran */}
+                        {/* Aksi: cetak kwitansi + lihat bukti pembayaran */}
                         <td className="p-3 text-center">
-                          {item.bukti_pembayaran_url ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8 gap-1.5"
-                              onClick={() => setBuktiPreviewUrl(item.bukti_pembayaran_url)}
-                            >
-                              <ImageIcon className="h-3.5 w-3.5" />
-                              Lihat
-                            </Button>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">-</span>
-                          )}
+                          <div className="flex items-center justify-center gap-1.5">
+                            <PrintButtonRekap item={item} />
+                            {item.bukti_pembayaran_url ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 gap-1.5"
+                                onClick={() => setBuktiPreviewUrl(item.bukti_pembayaran_url)}
+                              >
+                                <ImageIcon className="h-3.5 w-3.5" />
+                                Lihat Bukti Pembayaran
+                              </Button>
+                            ) : null}
+                          </div>
                         </td>
                       </tr>
                     );
