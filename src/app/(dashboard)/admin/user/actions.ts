@@ -260,4 +260,143 @@ export async function deleteUser(prevState: AuthFormState, formData: FormData) {
 
   revalidatePath("/admin/user");
   return { status: "success" };
+
+}
+
+  // ─── Import Users dari Excel (Bulk) ───────────────────────────────────────────
+export type ImportRow = {
+  nama_siswa: string;
+  NIS: string;
+  jenis_kelamin: string;
+  kelas: string;
+  angkatan: string;
+  nama_wali: string;
+  no_wa: string;
+  email: string;
+  password?: string;
+  tempat_lahir: string;
+  tanggal_lahir: string;
+  alamat?: string;
+  tipe_spp?: string;
+};
+
+export type ImportResult = {
+  total: number;
+  berhasil: number;
+  gagal: number;
+  detailGagal: { baris: number; nama: string; pesan: string }[];
+};
+
+export async function importUsersBulk(rows: ImportRow[]): Promise<ImportResult> {
+  const supabase = await createClient({ isAdmin: true });
+
+  const result: ImportResult = {
+    total: rows.length,
+    berhasil: 0,
+    gagal: 0,
+    detailGagal: [],
+  };
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const baris = i + 2; // +2 karena baris 1 di Excel adalah header
+
+    // Normalisasi jenis kelamin (sama seperti updateUser)
+    const jkLower = (row.jenis_kelamin || "").toLowerCase().trim();
+    let jenisKelamin: "Laki-laki" | "Perempuan" | undefined;
+    if (jkLower === "laki-laki" || jkLower === "l" || jkLower === "laki") {
+      jenisKelamin = "Laki-laki";
+    } else if (jkLower === "perempuan" || jkLower === "p") {
+      jenisKelamin = "Perempuan";
+    }
+
+    const validated = createUserSchema.safeParse({
+      email: row.email,
+      password: row.password || `siswa${row.NIS || "123456"}`,
+      nama_siswa: row.nama_siswa,
+      NIS: row.NIS,
+      jenis_kelamin: jenisKelamin,
+      kelas: row.kelas,
+      angkatan: String(row.angkatan || ""),
+      nama_wali: row.nama_wali,
+      no_wa: String(row.no_wa || ""),
+      tempat_lahir: row.tempat_lahir,
+      tanggal_lahir: row.tanggal_lahir,
+      alamat: row.alamat || undefined,
+      tipe_spp: row.tipe_spp?.toLowerCase() === "subsidi" ? "subsidi" : "reguler",
+      role: "siswa",
+    });
+
+    if (!validated.success) {
+      const msgs = Object.values(validated.error.flatten().fieldErrors)
+        .flat()
+        .join(", ");
+      result.gagal++;
+      result.detailGagal.push({
+        baris,
+        nama: row.nama_siswa || "-",
+        pesan: msgs || "Data tidak valid",
+      });
+      continue;
+    }
+
+    const { error: authError, data } = await supabase.auth.admin.createUser({
+      email: validated.data.email,
+      password: validated.data.password,
+      email_confirm: true,
+      user_metadata: { role: "siswa", nama_siswa: validated.data.nama_siswa },
+    });
+
+    if (authError || !data?.user) {
+      result.gagal++;
+      result.detailGagal.push({
+        baris,
+        nama: row.nama_siswa || "-",
+        pesan: authError?.message || "Gagal membuat akun (kemungkinan email sudah dipakai)",
+      });
+      continue;
+    }
+
+    const { error: insertError } = await supabase.from("siswa").upsert({
+      id: data.user.id,
+      email: validated.data.email,
+      namasiswa: validated.data.nama_siswa,
+      nis: validated.data.NIS || null,
+      jeniskelamin: validated.data.jenis_kelamin || null,
+      kelas: validated.data.kelas,
+      angkatan: validated.data.angkatan || null,
+      namawali: validated.data.nama_wali,
+      nowa: validated.data.no_wa,
+      tempatlahir: validated.data.tempat_lahir || null,
+      tanggallahir: validated.data.tanggal_lahir || null,
+      alamat: validated.data.alamat || null,
+      tipe_spp: validated.data.tipe_spp || "reguler",
+    });
+
+    if (insertError) {
+      // Rollback akun auth yang sudah terlanjur dibuat supaya tidak jadi akun yatim
+      await supabase.auth.admin.deleteUser(data.user.id);
+      result.gagal++;
+      result.detailGagal.push({
+        baris,
+        nama: row.nama_siswa || "-",
+        pesan: insertError.message,
+      });
+      continue;
+    }
+
+    result.berhasil++;
+  }
+
+  if (result.berhasil > 0) {
+    await writeChangelog({
+      supabase,
+      namamenu: "Data Siswa",
+      jenisaksi: "TAMBAH",
+      deskripsi: `Impor massal data siswa dari Excel: ${result.berhasil} berhasil, ${result.gagal} gagal`,
+    });
+  }
+
+  revalidatePath("/admin/user");
+  return result;
 }

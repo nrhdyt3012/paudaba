@@ -11,7 +11,7 @@ import {
 import useDataTable from "@/hooks/use-data-table";
 import { createClient } from "@/lib/supabase/client";
 import { useQuery } from "@tanstack/react-query";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2, Download } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { HEADER_TABLE_USER } from "@/constants/user-constant";
@@ -19,6 +19,8 @@ import DialogCreateUser from "./dialog-create-user";
 import DialogUpdateUser from "./dialog-update-user";
 import DialogDeleteUser from "./dialog-delete-user";
 import { Profile } from "@/types/auth";
+import * as XLSX from "xlsx";
+import DialogImportUser from "./dialog-import-user";
 
 const KELAS_FILTER_OPTIONS = [
   { value: "semua", label: "Semua Kelas" },
@@ -137,6 +139,31 @@ export default function UserManagement() {
 
     return rows;
   }, [users, filterJenisKelamin, sortBy]);
+
+  const handleExportExcel = () => {
+  const exportData = filteredSorted.map((item: any, index: number) => ({
+    "No": index + 1,
+    "NIS": item.nis || "",
+    "Nama Siswa": item.namasiswa || "",
+    "Jenis Kelamin": item.jeniskelamin || "",
+    "Tempat Lahir": item.tempatlahir || "",
+    "Tanggal Lahir": item.tanggallahir
+      ? new Date(item.tanggallahir).toLocaleDateString("id-ID")
+      : "",
+    "Nama Wali": item.namawali || "",
+    "No WA": item.nowa || "",
+    "Alamat": item.alamat || "",
+    "Kelas": item.kelas || "",
+    "Angkatan": item.angkatan || "",
+    "Tipe SPP": item.tipe_spp || "reguler",
+  }));
+
+  const worksheet = XLSX.utils.json_to_sheet(exportData);
+  worksheet["!cols"] = Object.keys(exportData[0] || {}).map(() => ({ wch: 18 }));
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Data Siswa");
+  XLSX.writeFile(workbook, `Data-Siswa-${new Date().toISOString().slice(0, 10)}.xlsx`);
+};
 
   const totalPages = useMemo(
     () => Math.ceil(filteredSorted.length / currentLimit),
@@ -325,15 +352,20 @@ export default function UserManagement() {
               ))}
             </SelectContent>
           </Select>
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button className="bg-green-600 hover:bg-green-700">
-                <Plus className="w-4 h-4 mr-2" />
-                Tambah
-              </Button>
-            </DialogTrigger>
-            <DialogCreateUser refetch={refetch} />
-          </Dialog>
+          <Button variant="outline" onClick={handleExportExcel}>
+  <Download className="w-4 h-4 mr-2" />
+  Ekspor Excel
+</Button>
+<DialogImportUser refetch={refetch} />
+<Dialog>
+  <DialogTrigger asChild>
+    <Button className="bg-green-600 hover:bg-green-700">
+      <Plus className="w-4 h-4 mr-2" />
+      Tambah
+    </Button>
+  </DialogTrigger>
+  <DialogCreateUser refetch={refetch} />
+</Dialog>
         </div>
       </div>
 
