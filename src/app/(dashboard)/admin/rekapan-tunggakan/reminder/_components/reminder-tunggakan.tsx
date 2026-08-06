@@ -5,13 +5,14 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/client";
 import { convertIDR } from "@/lib/utils";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   MessageSquare,
   Loader2,
   CheckCircle,
   XCircle,
   ArrowLeft,
+  RefreshCw,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -30,6 +31,9 @@ const randomDelay = () =>
   Math.floor(Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS + 1)) + MIN_DELAY_MS;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Interval polling fallback (jaga-jaga kalau realtime gagal connect)
+const POLL_INTERVAL_MS = 20_000;
+
 interface SiswaGroup {
   idsiswa: string;
   namasiswa: string;
@@ -39,21 +43,38 @@ interface SiswaGroup {
   daftarTagihan: string[]; // "SPP Juli 2026", dst
   nominalAsli: number;
   sisa: number;
+  // FIX: reminder WA terakhir — diambil dari tanggal PALING BARU di antara
+  // semua tagihan siswa ini yang pernah dikirimi reminder.
+  lastRemindedAt: string | null;
 }
+
+// FIX: format tanggal-bulan-tahun sesuai permintaan, misal "5 Agustus 2026"
+const formatTanggalReminder = (iso: string | null) => {
+  if (!iso) return "-";
+  return new Date(iso).toLocaleDateString("id-ID", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+};
 
 export default function ReminderTunggakan() {
   const supabase = createClient();
+  const queryClient = useQueryClient();
   const router = useRouter();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSending, setIsSending] = useState(false);
   const [statusMap, setStatusMap] = useState<Record<string, SendStatus>>({});
   const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [isLive, setIsLive] = useState(false);
   const cancelRef = useRef(false);
+
+  const QUERY_KEY = ["reminder-tunggakan-raw"];
 
   // ─── Ambil SEMUA tagihan yang statusnya masih tunggakan (semua periode,
   // bukan cuma bulan yang lagi dipilih di rekapan-tunggakan) ──────────────
-  const { data: rawData, isLoading } = useQuery({
-    queryKey: ["reminder-tunggakan-raw"],
+  const { data: rawData, isLoading, isFetching } = useQuery({
+    queryKey: QUERY_KEY,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("tagihan_siswa")
@@ -64,6 +85,7 @@ export default function ReminderTunggakan() {
           statuspembayaran,
           bulan,
           tahun,
+          whatsapp_notified_at,
           siswa:siswa!idsiswa(id, namasiswa, kelas, nowa),
           namatagihan
         `)
@@ -77,7 +99,44 @@ export default function ReminderTunggakan() {
       }
       return data || [];
     },
+    // FIX: jangan anggap data "fresh" lama-lama — begitu ada sinyal
+    // (realtime/focus/polling) langsung boleh re-fetch.
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    // FIX: fallback polling tiap 20 detik, jaga-jaga kalau koneksi realtime
+    // sempat putus atau Realtime belum diaktifkan di project Supabase.
+    refetchInterval: POLL_INTERVAL_MS,
   });
+
+  // ─── FIX: Realtime sync ────────────────────────────────────────────────
+  // Dengarkan perubahan langsung dari database (INSERT/UPDATE/DELETE) di
+  // tabel tagihan_siswa. Begitu ada siapa pun (dari sesi/akun/tab manapun)
+  // yang mengubah jumlahterbayar, status, atau whatsapp_notified_at, semua
+  // tab yang sedang buka halaman ini langsung re-fetch tanpa perlu reload.
+  //
+  // CATATAN PENTING: fitur ini butuh Realtime diaktifkan untuk tabel
+  // tagihan_siswa di Supabase Dashboard → Database → Replication. Kalau
+  // belum aktif, halaman tetap akan ter-update lewat polling 20 detik di
+  // atas, hanya saja tidak instan.
+  useEffect(() => {
+    const channel = supabase
+      .channel("realtime-tagihan-siswa-reminder")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tagihan_siswa" },
+        () => {
+          queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+        }
+      )
+      .subscribe((status) => {
+        setIsLive(status === "SUBSCRIBED");
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const BULAN_SINGKAT = [
     "", "Jan", "Feb", "Mar", "Apr", "Mei", "Jun",
@@ -112,6 +171,7 @@ export default function ReminderTunggakan() {
           daftarTagihan: [],
           nominalAsli: 0,
           sisa: 0,
+          lastRemindedAt: null,
         });
       }
 
@@ -120,6 +180,14 @@ export default function ReminderTunggakan() {
       g.daftarTagihan.push(label);
       g.nominalAsli += parseFloat(item.jumlahtagihan || "0");
       g.sisa += sisa;
+
+      // FIX: ambil tanggal reminder PALING BARU di antara semua tagihan
+      // tertunggak milik siswa ini.
+      if (item.whatsapp_notified_at) {
+        if (!g.lastRemindedAt || new Date(item.whatsapp_notified_at) > new Date(g.lastRemindedAt)) {
+          g.lastRemindedAt = item.whatsapp_notified_at;
+        }
+      }
     });
 
     return Array.from(map.values()).sort((a, b) => b.sisa - a.sisa);
@@ -219,6 +287,11 @@ export default function ReminderTunggakan() {
 
     setIsSending(false);
 
+    // FIX: setelah selesai kirim, tarik ulang data supaya kolom
+    // "Terakhir Diingatkan" langsung menampilkan tanggal terbaru
+    // (backup untuk realtime, memastikan data pasti sinkron).
+    queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+
     if (cancelRef.current) {
       toast.info(`Dihentikan. Terkirim ${success}, sisanya dibatalkan.`);
     } else if (failed === 0) {
@@ -245,12 +318,37 @@ export default function ReminderTunggakan() {
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>
+          <CardTitle className="flex items-center gap-2">
             Daftar Siswa Menunggak
             <span className="ml-2 text-sm font-normal text-muted-foreground">
               (digabung per siswa, semua periode tertunggak)
             </span>
           </CardTitle>
+          {/* FIX: indikator status sinkronisasi data */}
+          <div className="flex items-center gap-2 text-xs">
+            {/* <span
+              className={`flex items-center gap-1.5 ${
+                isLive ? "text-green-600" : "text-muted-foreground"
+              }`}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  isLive ? "bg-green-600 animate-pulse" : "bg-gray-300"
+                }`}
+              />
+              {isLive ? "Live" : "Menyambungkan..."}
+            </span> */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={() => queryClient.invalidateQueries({ queryKey: QUERY_KEY })}
+              disabled={isFetching}
+              title="Muat ulang data sekarang"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           {invalidCount > 0 && (
@@ -319,6 +417,7 @@ export default function ReminderTunggakan() {
                     <th className="text-right p-3">Nominal Asli</th>
                     <th className="text-right p-3">Sisa</th>
                     <th className="text-center p-3">Status Kirim</th>
+                    <th className="text-left p-3">Terakhir Diingatkan</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -365,6 +464,10 @@ export default function ReminderTunggakan() {
                             <XCircle className="h-4 w-4 text-red-600 mx-auto" />
                           )}
                         </td>
+                        {/* FIX: kolom baru — tanggal reminder WA terakhir */}
+                        <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">
+                          {formatTanggalReminder(g.lastRemindedAt)}
+                        </td>
                       </tr>
                     );
                   })}
@@ -373,7 +476,7 @@ export default function ReminderTunggakan() {
                   <tr className="border-t-2 font-bold bg-muted/30">
                     <td colSpan={5} className="p-3 text-right">Total Sisa Terpilih:</td>
                     <td className="p-3 text-right text-red-600">{convertIDR(totalSisaTerpilih)}</td>
-                    <td />
+                    <td colSpan={2} />
                   </tr>
                 </tfoot>
               </table>
