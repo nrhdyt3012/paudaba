@@ -41,27 +41,27 @@ const BULAN_NAMA = [
 export default function TagihanSiswaPage() {
   const supabase = createClient();
   const queryClient = useQueryClient();
-  const profile = useAuthStore((state) => state.profile);
+  const activeSiswaId = useAuthStore((state) => state.profile.activeSiswaId);
   const [selectedTagihan, setSelectedTagihan] = useState<any>(null);
   const [showDialog, setShowDialog] = useState(false);
   const [isPaymentLoading, setIsPaymentLoading] = useState(false);
 
   const { data: siswaData } = useQuery({
-    queryKey: ["siswa-self", profile.id],
-    enabled: !!profile.id,
+    queryKey: ["siswa-self", activeSiswaId],
+    enabled: !!activeSiswaId,
     queryFn: async () => {
       const { data } = await supabase
         .from("siswa")
         .select("*")
-        .eq("id", profile.id)
+        .eq("id", activeSiswaId)
         .single();
       return data;
     },
   });
 
   const { data: tagihanList, isLoading, refetch } = useQuery({
-    queryKey: ["tagihan-siswa-wali", profile.id],
-    enabled: !!profile.id,
+    queryKey: ["tagihan-siswa-wali", activeSiswaId],
+    enabled: !!activeSiswaId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("tagihan_siswa")
@@ -78,7 +78,7 @@ export default function TagihanSiswaPage() {
             id_mastertagihan, namatagihan, jenjang, jenistagihan, nominal
           )
         `)
-        .eq("idsiswa", profile.id)
+        .eq("idsiswa", activeSiswaId)
         .in("statuspembayaran", ["BELUM BAYAR","BELUM LUNAS", "KADALUARSA"])
         .order("tahun", { ascending: false })
         .order("bulan", { ascending: false });
@@ -92,14 +92,14 @@ export default function TagihanSiswaPage() {
   });
 
   const { data: pendingPembayaran } = useQuery({
-    queryKey: ["pending-pembayaran", profile.id],
-    enabled: !!profile.id,
+    queryKey: ["pending-pembayaran", activeSiswaId],
+    enabled: !!activeSiswaId,
     refetchInterval: 8_000,
     queryFn: async () => {
       const { data } = await supabase
         .from("pembayaran")
         .select("idpembayaran, idtagihansiswa")
-        .eq("idsiswa", profile.id)
+        .eq("idsiswa", activeSiswaId)
         .eq("statuspembayaran", "PENDING");
       return data || [];
     },
@@ -107,25 +107,25 @@ export default function TagihanSiswaPage() {
 
   const handleRealtimeUpdate = useCallback(() => {
     queryClient.invalidateQueries({
-      queryKey: ["tagihan-siswa-wali", profile.id],
+      queryKey: ["tagihan-siswa-wali", activeSiswaId],
     });
     queryClient.invalidateQueries({
-      queryKey: ["pending-pembayaran", profile.id],
+      queryKey: ["pending-pembayaran", activeSiswaId],
     });
-  }, [queryClient, profile.id]);
+  }, [queryClient, activeSiswaId]);
 
   useEffect(() => {
-    if (!profile.id) return;
+    if (!activeSiswaId) return;
 
     const tagihanChannel = supabase
-      .channel(`tagihan-siswa-${profile.id}`)
+      .channel(`tagihan-siswa-${activeSiswaId}`)
       .on(
         "postgres_changes",
         {
           event: "UPDATE",
           schema: "public",
           table: "tagihan_siswa",
-          filter: `idsiswa=eq.${profile.id}`,
+          filter: `idsiswa=eq.${activeSiswaId}`,
         },
         (payload: any) => {
           console.log("[realtime] tagihan_siswa UPDATE:", payload.new);
@@ -146,14 +146,14 @@ export default function TagihanSiswaPage() {
       .subscribe();
 
     const pembayaranChannel = supabase
-      .channel(`pembayaran-siswa-${profile.id}`)
+      .channel(`pembayaran-siswa-${activeSiswaId}`)
       .on(
         "postgres_changes",
         {
           event: "*",
           schema: "public",
           table: "pembayaran",
-          filter: `idsiswa=eq.${profile.id}`,
+          filter: `idsiswa=eq.${activeSiswaId}`,
         },
         () => {
           handleRealtimeUpdate();
@@ -165,7 +165,7 @@ export default function TagihanSiswaPage() {
       tagihanChannel.unsubscribe();
       pembayaranChannel.unsubscribe();
     };
-  }, [profile.id, handleRealtimeUpdate]);
+  }, [activeSiswaId, handleRealtimeUpdate]);
 
   const getSisaTagihan = (tagihan: any): number => {
     const total = parseFloat(tagihan.jumlahtagihan || 0);
@@ -196,8 +196,8 @@ export default function TagihanSiswaPage() {
           order_id: selectedTagihan.idtagihansiswa,
           gross_amount: sisaTagihan,
           nominal_total: parseFloat(selectedTagihan.jumlahtagihan || 0),
-          customer_name: siswaData?.namasiswa || profile.name || "Siswa",
-          customer_id: profile.id,
+          customer_name: siswaData?.namasiswa || siswaData.name || "Siswa",
+          customer_id: activeSiswaId,
         }),
       });
 
@@ -307,7 +307,7 @@ export default function TagihanSiswaPage() {
     }
   };
 
-  if (!profile.id) {
+  if (!activeSiswaId) {
     return (
       <div className="flex justify-center items-center min-h-[400px]">
         <Loader2 className="animate-spin h-8 w-8 text-green-600" />
@@ -500,7 +500,7 @@ export default function TagihanSiswaPage() {
                   <User className="w-4 h-4 text-muted-foreground" />
                   <span className="text-muted-foreground">Nama:</span>
                   <span className="font-medium">
-                    {siswaData?.namasiswa || profile.name}
+                    {siswaData?.namasiswa || "-"}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">

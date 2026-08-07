@@ -265,8 +265,11 @@ export default function AppSidebar() {
             {/* Nama & Role */}
             <div className="flex-1 min-w-0">
               <p className="text-xs font-semibold truncate leading-tight">
-                {profile?.name || "Pengguna"}
-              </p>
+{isSiswa
+                  ? (profile as any)?.children?.find((c: any) => c.id === (profile as any).activeSiswaId)?.namaSiswa
+                    ?? profile?.name
+                  : profile?.name || "Pengguna"}    
+                            </p>
               <p className={cn("text-xs font-medium leading-tight", roleColor)}>
                 {isSuperadmin
                   ? "Superadmin"
@@ -297,6 +300,16 @@ export default function AppSidebar() {
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 */}
+                {isSiswa && (profile as any)?.children?.length > 1 && (
+                  <DropdownMenuItem
+                    onClick={() => router.push("/siswa/pilih-anak")}
+                    className="cursor-pointer gap-2"
+                  >
+                    <Users className="w-4 h-4" />
+                    Ganti Siswa
+                  </DropdownMenuItem>
+                )}
+
                 <DropdownMenuItem
                   onClick={() => setShowLogoutDialog(true)}
                   className="cursor-pointer gap-2 text-red-600 focus:text-red-600 focus:bg-red-50 dark:focus:bg-red-950"

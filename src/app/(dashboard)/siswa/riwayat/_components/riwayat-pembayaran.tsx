@@ -74,23 +74,23 @@ type SisaTagihanItem = {
 
 export default function RiwayatPembayaran() {
   const supabase = createClient();
-  const profile = useAuthStore((state) => state.profile);
+  const activeSiswaId = useAuthStore((state) => state.profile.activeSiswaId);
   const [expandedTagihan, setExpandedTagihan] = useState<Set<number>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("semua");
 
   const { data: siswaData } = useQuery({
-    queryKey: ["siswa-self-riwayat", profile.id],
-    enabled: !!profile.id,
+    queryKey: ["siswa-self-riwayat", activeSiswaId],
+    enabled: !!activeSiswaId,
     queryFn: async () => {
-      const { data } = await supabase.from("siswa").select("*").eq("id", profile.id).single();
+      const { data } = await supabase.from("siswa").select("*").eq("id", activeSiswaId).single();
       return data;
     },
   });
 
   const { data: riwayatList, isLoading } = useQuery({
-    queryKey: ["riwayat-siswa", profile.id],
-    enabled: !!profile.id,
+    queryKey: ["riwayat-siswa", activeSiswaId],
+    enabled: !!activeSiswaId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("tagihan_siswa")
@@ -114,7 +114,7 @@ export default function RiwayatPembayaran() {
             sisa_setelah_transaksi_ini
           )
         `)
-        .eq("idsiswa", profile.id)
+        .eq("idsiswa", activeSiswaId)
         .order("tahun", { ascending: false })
         .order("bulan", { ascending: false });
 
@@ -127,8 +127,8 @@ export default function RiwayatPembayaran() {
   });
 
   const { data: sisaTagihanList } = useQuery({
-    queryKey: ["sisa-tagihan-belum-bayar", profile.id],
-    enabled: !!profile.id,
+    queryKey: ["sisa-tagihan-belum-bayar", activeSiswaId],
+    enabled: !!activeSiswaId,
     queryFn: async () => {
       const { data } = await supabase
         .from("tagihan_siswa")
@@ -139,7 +139,7 @@ export default function RiwayatPembayaran() {
           tahun,
           namatagihan
         `)
-        .eq("idsiswa", profile.id)
+        .eq("idsiswa", activeSiswaId)
         .in("statuspembayaran", ["BELUM BAYAR", "BELUM LUNAS"])
         .order("tahun", { ascending: false })
         .order("bulan", { ascending: false });

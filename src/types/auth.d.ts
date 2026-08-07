@@ -22,11 +22,21 @@ export type AuthFormState = {
   };
 };
 
+export type SiswaChild = {
+  id: string;          // siswa.id (UUID siswa, bukan auth id)
+  namaSiswa: string;
+  kelas?: string;
+  angkatan?: string;
+};
+
+
 export type Profile = {
   id?: string;
   name?: string;
   avatar_url?: string;
   role?: string;
+   children?: SiswaChild[];  // hanya terisi kalau role === "siswa"
+  activeSiswaId?: string;   // siswa.id yang sedang aktif ditampilkan
   // Data siswa (camelCase sesuai database)
   NIS?: string;
   namaSiswa?: string;
@@ -44,3 +54,4 @@ export type Profile = {
   tempat_lahir?: string;
   tanggal_lahir?: string;
 };
+

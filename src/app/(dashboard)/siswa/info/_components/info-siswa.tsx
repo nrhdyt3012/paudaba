@@ -32,17 +32,17 @@ function getAvatarColor(name?: string | null): string {
 }
 
 export default function InfoSiswa() {
-  const profile = useAuthStore((state) => state.profile);
+  const activeSiswaId = useAuthStore((state) => state.profile.activeSiswaId);
   const supabase = createClient();
 
   const { data: siswaData, isLoading } = useQuery({
-    queryKey: ["siswa-detail-self", profile.id],
-    enabled: !!profile.id,
+    queryKey: ["siswa-detail-self", activeSiswaId],
+    enabled: !!activeSiswaId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("siswa")
         .select("*")
-        .eq("id", profile.id)
+        .eq("id", activeSiswaId)
         .single();
       if (error) throw error;
       return data;
@@ -57,7 +57,7 @@ export default function InfoSiswa() {
     );
   }
 
-  const namaLengkap = siswaData?.namasiswa || profile.name || "";
+  const namaLengkap = siswaData?.namasiswa || activeSiswaId || "";
   const initials = getInitials(namaLengkap);
   const avatarColor = getAvatarColor(namaLengkap);
 
