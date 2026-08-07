@@ -1,5 +1,10 @@
 "use client";
 
+// components/laporan-riwayat-template.tsx
+// Sama seperti kwitansi: profil sekolah sekarang dinamis lewat `data.sekolah`.
+
+import type { SekolahInfo } from "./kwitansi-template"; // re-use tipe yang sama
+
 export interface LaporanRiwayatItem {
   idpembayaran: number;
   tanggalpembayaran: string;
@@ -11,8 +16,6 @@ export interface LaporanRiwayatItem {
   metodepembayaran: string;
 }
 
-// BARU: item untuk tabel rincian tagihan yang belum lunas (diambil dari data
-// tagihan terkini, bukan dari histori pembayaran).
 export interface TagihanBelumLunasItem {
   idtagihansiswa: number;
   namatagihan: string;
@@ -30,33 +33,31 @@ export interface LaporanRiwayatData {
   jamCetak: string;
   items: LaporanRiwayatItem[];
   totalDibayarKeseluruhan: number;
-  // BARU
   tagihanBelumLunas: TagihanBelumLunasItem[];
   totalSisaBelumLunas: number;
+  // BARU
+  sekolah: SekolahInfo;
 }
-
-const NAMA_BENDAHARA = "Sri Wahyuni";
 
 function formatRupiah(n: number) {
   return new Intl.NumberFormat("id-ID").format(Math.max(0, Math.round(n)));
 }
 
-// FIX (dosen pembimbing): laporan sekarang berisi DUA tabel — (1) mutasi
-// riwayat pembayaran seperti sebelumnya, dan (2) rincian tagihan yang masih
-// belum lunas (data terkini), supaya wali siswa tahu persis sisa tagihan
-// yang belum dibayarkan. Judul laporan diganti jadi "Laporan Tagihan
-// Menyeluruh" karena isinya bukan cuma riwayat lagi.
 export default function LaporanRiwayatTemplate({ data }: { data: LaporanRiwayatData }) {
+  const { sekolah } = data;
+
   return (
     <div className="bg-white text-black" style={{ width: "210mm", minHeight: "297mm", padding: "15mm" }}>
       {/* Header */}
       <div className="flex items-center justify-between border-b-2 border-black pb-3 mb-4">
         <div className="flex items-center gap-3">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.jpg" alt="Logo" className="h-14 w-14 object-contain" />
+          {sekolah.logoUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={sekolah.logoUrl} alt="Logo" className="h-14 w-14 object-contain" />
+          )}
           <div>
-            <p className="font-bold text-lg leading-tight">KB TK AISYIYAH BUSTANUL ATHFAL 1</p>
-            <p className="text-sm leading-tight">BUDURAN — SIDOARJO</p>
+            <p className="font-bold text-lg leading-tight">{sekolah.namaSekolah}</p>
+            <p className="text-sm leading-tight">{sekolah.alamatSekolah}</p>
           </div>
         </div>
         <div className="text-right">
@@ -142,7 +143,7 @@ export default function LaporanRiwayatTemplate({ data }: { data: LaporanRiwayatD
         </tfoot>
       </table>
 
-      {/* Tabel 2: BARU — Rincian tagihan yang belum lunas (data terkini) */}
+      {/* Tabel 2: Rincian tagihan yang belum lunas */}
       <p className="font-bold text-sm mb-2">Rincian Tagihan yang Belum Lunas</p>
       <table className="w-full text-xs border-collapse mb-4">
         <thead>
@@ -197,14 +198,16 @@ export default function LaporanRiwayatTemplate({ data }: { data: LaporanRiwayatD
           <p className="text-sm mb-1">Buduran, {data.tanggalCetak}</p>
           <p className="text-sm mb-1">Bendahara,</p>
           <div className="h-20 w-36 flex items-end justify-center mx-auto -mb-1">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/tanda-tangan-bendahara.png"
-              alt={`Tanda tangan ${NAMA_BENDAHARA}`}
-              className="max-h-20 max-w-36 object-contain"
-            />
+            {sekolah.tandaTanganUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={sekolah.tandaTanganUrl}
+                alt={`Tanda tangan ${sekolah.namaBendahara}`}
+                className="max-h-20 max-w-36 object-contain"
+              />
+            )}
           </div>
-          <p className="font-semibold underline underline-offset-2">{NAMA_BENDAHARA}</p>
+          <p className="font-semibold underline underline-offset-2">{sekolah.namaBendahara}</p>
         </div>
       </div>
     </div>

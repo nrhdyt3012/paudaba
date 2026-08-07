@@ -25,6 +25,8 @@ import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
 import SiswaListDialog from "./siswa-list-dialog";
+import EditProfilSekolahDialog from "../../../components/common/edit-profil-sekolah"; // sesuaikan path
+import { Settings } from "lucide-react"; // tambahkan ke import lucide-react yang sudah ada
 import PembayaranListDialog from "./pembayaran-list-dialog";
 
 const STATUS_TUNGGAKAN = ["BELUM BAYAR", "BELUM LUNAS"] as const;
@@ -50,6 +52,7 @@ export default function DashboardShared() {
   const [showPerempuanDialog, setShowPerempuanDialog] = useState(false);
   const [showTotalSiswaDialog, setShowTotalSiswaDialog] = useState(false);
   const [showSudahBayarDialog, setShowSudahBayarDialog] = useState(false);
+  const [showEditProfilDialog, setShowEditProfilDialog] = useState(false);
 
   // ─── Siswa sesuai filter angkatan ─────────────────────────────────────────
   // FIX: pakai `is_active` (bukan `status`) — sekarang satu-satunya sumber
@@ -229,12 +232,22 @@ export default function DashboardShared() {
 
   return (
     <div className="w-full space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Dashboard</h1>
-        <p className="text-muted-foreground text-sm">
-          KB/TK Aisyiyah Bustanul Athfal 1 Buduran
-        </p>
-      </div>
+<div className="flex items-center justify-between">
+  <div>
+    <h1 className="text-2xl font-bold">Dashboard</h1>
+    <p className="text-muted-foreground text-sm">
+      KB/TK Aisyiyah Bustanul Athfal 1 Buduran
+    </p>
+  </div>
+  <Button
+    variant="outline"
+    size="sm"
+    onClick={() => setShowEditProfilDialog(true)}
+  >
+    <Settings className="h-4 w-4 mr-1.5" />
+    Edit Profil Sekolah
+  </Button>
+</div>
 
       {/* ─── Sensus Siswa — SEMUA kartu sekarang bisa diklik ─────────────────── */}
       <div>
@@ -606,6 +619,11 @@ export default function DashboardShared() {
         onOpenChange={setShowSudahBayarDialog}
         idSiswaFilter={angkatan !== "semua" ? idList : null}
       />
+      <EditProfilSekolahDialog
+        open={showEditProfilDialog}
+        onOpenChange={setShowEditProfilDialog}
+      />
+      
     </div>
   );
 }

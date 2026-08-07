@@ -1,5 +1,18 @@
 "use client";
 
+// components/kwitansi-template.tsx
+// Perubahan dari versi lama: nama sekolah, alamat, logo, nama bendahara, dan
+// foto tanda tangan SEKARANG datang dari `data.sekolah` (diisi dari tabel
+// pengaturan_sekolah), bukan lagi hardcode di komponen ini.
+
+export interface SekolahInfo {
+  namaSekolah: string;
+  alamatSekolah: string;
+  logoUrl: string | null;
+  namaBendahara: string;
+  tandaTanganUrl: string | null;
+}
+
 export interface KwitansiData {
   noKwitansi: string;
   tanggalCetak: string;
@@ -21,6 +34,8 @@ export interface KwitansiData {
     tahun: number;
     namatagihan: string;
   }>;
+  // BARU: profil sekolah dinamis
+  sekolah: SekolahInfo;
 }
 
 const BULAN_NAMA = [
@@ -32,22 +47,21 @@ function formatRupiah(n: number) {
   return new Intl.NumberFormat("id-ID").format(Math.max(0, Math.round(n)));
 }
 
-// Nama bendahara yang menandatangani kwitansi. FIX: gambar tanda tangan asli
-// sudah ditempel di public/tanda-tangan-bendahara.png (background sudah
-// dibuat transparan), diletakkan tepat di atas nama ini.
-const NAMA_BENDAHARA = "Sri Wahyuni";
-
 export default function KwitansiTemplate({ data }: { data: KwitansiData }) {
+  const { sekolah } = data;
+
   return (
     <div className="bg-white text-black" style={{ width: "210mm", minHeight: "148mm", padding: "12mm" }}>
       {/* Header */}
       <div className="flex items-center justify-between border-b-2 border-black pb-3 mb-4">
         <div className="flex items-center gap-3">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.jpg" alt="Logo" className="h-14 w-14 object-contain" />
+          {sekolah.logoUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={sekolah.logoUrl} alt="Logo" className="h-14 w-14 object-contain" />
+          )}
           <div>
-            <p className="font-bold text-lg leading-tight">KB TK AISYIYAH BUSTANUL ATHFAL 1</p>
-            <p className="text-sm leading-tight">BUDURAN — SIDOARJO</p>
+            <p className="font-bold text-lg leading-tight">{sekolah.namaSekolah}</p>
+            <p className="text-sm leading-tight">{sekolah.alamatSekolah}</p>
           </div>
         </div>
         <div className="text-right">
@@ -93,30 +107,22 @@ export default function KwitansiTemplate({ data }: { data: KwitansiData }) {
           </tr>
         </thead>
         <tbody>
-          {/* Baris 1: nominal awal tagihan secara keseluruhan (utuh, belum
-              dikurangi apa pun). */}
           <tr>
             <td className="border border-gray-300 p-2">Total Tagihan Keseluruhan</td>
             <td className="border border-gray-300 p-2 text-right">Rp{formatRupiah(data.totalTagihan)}</td>
           </tr>
-          {/* Baris 2: akumulasi pembayaran SEBELUM transaksi ini terjadi
-              (tidak termasuk nominal transaksi ini) — supaya alurnya jelas:
-              Total Tagihan − Sudah Dibayar (sebelumnya) − Dibayar (transaksi
-              ini) = Sisa. */}
           <tr>
             <td className="border border-gray-300 p-2">Jumlah Sudah Dibayar (sebelum transaksi ini)</td>
             <td className="border border-gray-300 p-2 text-right">
               Rp{formatRupiah(data.totalTagihan - data.sisaTagihan - data.jumlahDibayar)}
             </td>
           </tr>
-          {/* Baris 3: nominal yang dibayar KHUSUS pada transaksi ini saja. */}
           <tr>
             <td className="border border-gray-300 p-2 font-semibold">Dibayar pada Transaksi Ini</td>
             <td className="border border-gray-300 p-2 text-right font-semibold">
               Rp{formatRupiah(data.jumlahDibayar)}
             </td>
           </tr>
-          {/* Baris 4: sisa setelah transaksi ini — LUNAS kalau sisa = 0. */}
           <tr>
             <td className="border border-gray-300 p-2">Sisa Tagihan</td>
             <td className="border border-gray-300 p-2 text-right">
@@ -145,30 +151,22 @@ export default function KwitansiTemplate({ data }: { data: KwitansiData }) {
         </div>
       )}
 
-      {/* Footer: QR + Tanda tangan */}
+      {/* Footer: tanda tangan */}
       <div className="flex justify-end items-end mt-8">
-        {/* <div className="flex flex-col items-center">
-          {data.qrCodeDataUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={data.qrCodeDataUrl} alt="QR Kwitansi" className="w-20 h-20" />
-          )}
-          <p className="text-[10px] text-gray-500 mt-1">Scan untuk verifikasi</p>
-        </div> */}
-
         <div className="text-center">
           <p className="text-sm mb-1">Buduran, {data.tanggalCetak}</p>
           <p className="text-sm mb-1">Bendahara,</p>
-          {/* FIX: tanda tangan asli (background sudah transparan), ditempel
-              tepat di atas nama bendahara — gantikan garis kosong lama. */}
           <div className="h-20 w-36 flex items-end justify-center mx-auto -mb-1">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/tanda-tangan-bendahara.png"
-              alt={`Tanda tangan ${NAMA_BENDAHARA}`}
-              className="max-h-20 max-w-36 object-contain"
-            />
+            {sekolah.tandaTanganUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={sekolah.tandaTanganUrl}
+                alt={`Tanda tangan ${sekolah.namaBendahara}`}
+                className="max-h-20 max-w-36 object-contain"
+              />
+            )}
           </div>
-          <p className="font-semibold underline underline-offset-2">{NAMA_BENDAHARA}</p>
+          <p className="font-semibold underline underline-offset-2">{sekolah.namaBendahara}</p>
         </div>
       </div>
     </div>
