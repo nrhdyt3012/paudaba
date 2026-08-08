@@ -14,8 +14,10 @@ import {
 // ─── Create User ──────────────────────────────────────────────────────────────
 export async function createUser(prevState: AuthFormState, formData: FormData) {
   const validatedFields = createUserSchema.safeParse({
-    email: formData.get("email"),
-    password: formData.get("password"),
+    mode: (formData.get("mode") as string) || "baru",
+    wali_auth_id: formData.get("wali_auth_id") || undefined,
+    email: formData.get("email") || undefined,
+    password: formData.get("password") || undefined,
     nama_siswa: formData.get("nama_siswa"),
     NIS: formData.get("NIS"),
     jenis_kelamin: formData.get("jenis_kelamin") || undefined,
@@ -39,84 +41,131 @@ export async function createUser(prevState: AuthFormState, formData: FormData) {
       .join(" | ");
     return {
       status: "error",
-      errors: {
-        ...fieldErrors,
-        _form: [errorMessages || "Validasi form gagal"],
-      },
+      errors: { ...fieldErrors, _form: [errorMessages || "Validasi form gagal"] },
     };
   }
 
   const supabase = await createClient({ isAdmin: true });
+  const data_ = validatedFields.data;
 
-  const { error: authError, data } = await supabase.auth.admin.createUser({
-    email: validatedFields.data.email,
-    password: validatedFields.data.password,
-    email_confirm: true,
-    user_metadata: {
-      role: validatedFields.data.role,
-      nama_siswa: validatedFields.data.nama_siswa,
-    },
-  });
+  let waliAuthId: string;
+  let emailSiswa: string;
+  let akunAuthBaruDibuat = false;
 
-  if (authError) {
-    return {
-      status: "error",
-      errors: { ...prevState?.errors, _form: [authError.message] },
-    };
-  }
+  if (data_.mode === "existing") {
+    // ── Anak dari wali yang sudah ada — TIDAK bikin akun auth baru ──────────
+    waliAuthId = data_.wali_auth_id!;
 
-  if (data?.user) {
-    const { error: insertError } = await supabase.from("siswa").upsert({
-      id: data.user.id,
-      email: validatedFields.data.email,
-      namasiswa: validatedFields.data.nama_siswa,
-      nis: validatedFields.data.NIS || null,
-      jeniskelamin: validatedFields.data.jenis_kelamin || null,
-      kelas: validatedFields.data.kelas,
-      angkatan: validatedFields.data.angkatan || null,
-      namawali: validatedFields.data.nama_wali,
-      nowa: validatedFields.data.no_wa,
-      tempatlahir: validatedFields.data.tempat_lahir || null,
-      tanggallahir: validatedFields.data.tanggal_lahir || null,
-      alamat: validatedFields.data.alamat || null,
-      tipe_spp: validatedFields.data.tipe_spp || "reguler",
-      // FIX: `status: "aktif"` dihapus — kolom itu sudah tidak dipakai lagi
-      // (digantikan `is_active`, yang otomatis default `true` dari skema
-      // database, jadi tidak perlu diisi manual di sini).
+    const { data: waliExisting } = await supabase
+      .from("siswa")
+      .select("email")
+      .eq("wali_auth_id", waliAuthId)
+      .limit(1)
+      .maybeSingle();
+
+    if (!waliExisting) {
+      return { status: "error", errors: { _form: ["Data wali tidak ditemukan, silakan pilih ulang."] } };
+    }
+    emailSiswa = waliExisting.email;
+  } else {
+    // ── Wali baru — bikin akun auth seperti sebelumnya ───────────────────────
+    const { error: authError, data: authData } = await supabase.auth.admin.createUser({
+      email: data_.email!,
+      password: data_.password!,
+      email_confirm: true,
+      user_metadata: { role: data_.role, nama_siswa: data_.nama_siswa },
     });
 
-    if (insertError) {
-      console.error("[createUser] Insert siswa error:", insertError.message);
-    } else {
-      await writeChangelog({
-        supabase,
-        namamenu: "Data Siswa",
-        jenisaksi: "TAMBAH",
-        deskripsi: `Menambahkan data siswa: ${validatedFields.data.nama_siswa} (${validatedFields.data.kelas} - SPP ${validatedFields.data.tipe_spp})`,
-      });
+    if (authError) {
+      return { status: "error", errors: { ...prevState?.errors, _form: [authError.message] } };
     }
+    if (!authData?.user) {
+      return { status: "error", errors: { _form: ["Gagal membuat akun wali"] } };
+    }
+    waliAuthId = authData.user.id;
+    emailSiswa = data_.email!;
+    akunAuthBaruDibuat = true;
   }
+
+  const { error: insertError } = await supabase.from("siswa").insert({
+    // id TIDAK diisi manual — otomatis gen_random_uuid() dari default kolom
+    wali_auth_id: waliAuthId,
+    email: emailSiswa,
+    namasiswa: data_.nama_siswa,
+    nis: data_.NIS || null,
+    jeniskelamin: data_.jenis_kelamin || null,
+    kelas: data_.kelas,
+    angkatan: data_.angkatan || null,
+    namawali: data_.nama_wali,
+    nowa: data_.no_wa,
+    tempatlahir: data_.tempat_lahir || null,
+    tanggallahir: data_.tanggal_lahir || null,
+    alamat: data_.alamat || null,
+    tipe_spp: data_.tipe_spp || "reguler",
+  });
+
+  if (insertError) {
+    console.error("[createUser] Insert siswa error:", insertError.message);
+    // Kalau wali baru saja dibuat dan insert siswa gagal, rollback akun
+    // auth-nya supaya tidak ada akun "yatim" tanpa data siswa.
+    if (akunAuthBaruDibuat) {
+      await supabase.auth.admin.deleteUser(waliAuthId);
+    }
+    return { status: "error", errors: { _form: [`Gagal menyimpan data siswa: ${insertError.message}`] } };
+  }
+
+  await writeChangelog({
+    supabase,
+    namamenu: "Data Siswa",
+    jenisaksi: "TAMBAH",
+    deskripsi: `Menambahkan data siswa: ${data_.nama_siswa} (${data_.kelas} - SPP ${data_.tipe_spp})${
+      data_.mode === "existing" ? " — anak tambahan dari wali yang sudah terdaftar" : ""
+    }`,
+  });
 
   revalidatePath("/admin/user");
   return { status: "success" };
 }
 
-// ─── Update User ──────────────────────────────────────────────────────────────
+// ─── Cari Wali yang Sudah Terdaftar (untuk form Tambah Siswa) ─────────────────
+// ─── Cari Wali yang Sudah Terdaftar (untuk form Tambah Siswa) ─────────────────
+// Bisa dicari lewat email, nama wali, atau nomor WA — tidak cuma email saja.
+export async function searchWaliByEmail(query: string) {
+  if (!query || query.trim().length < 2) return [];
+  const supabase = await createClient({ isAdmin: true });
+  const q = query.trim();
+
+  const { data } = await supabase
+    .from("siswa")
+    .select("wali_auth_id, email, namawali, nowa")
+    .or(`email.ilike.%${q}%,namawali.ilike.%${q}%,nowa.ilike.%${q}%`)
+    .limit(10);
+
+  // Unikkan per wali_auth_id — satu wali bisa punya beberapa baris anak,
+  // jangan sampai muncul dobel di hasil pencarian.
+  const seen = new Set<string>();
+  const result: { wali_auth_id: string; email: string; namawali: string; nowa: string }[] = [];
+  for (const row of data || []) {
+    if (row.wali_auth_id && !seen.has(row.wali_auth_id)) {
+      seen.add(row.wali_auth_id);
+      result.push(row as any);
+    }
+  }
+  return result;
+}
+
 export async function updateUser(prevState: AuthFormState, formData: FormData) {
   const jenisKelaminRaw = formData.get("jenis_kelamin") as string;
 
-  // Normalisasi jenis kelamin agar cocok dengan enum Zod
   let jenisKelamin: "Laki-laki" | "Perempuan" | undefined;
   if (jenisKelaminRaw) {
     const jkLower = jenisKelaminRaw.toLowerCase().trim();
-    if (jkLower === "laki-laki" || jkLower === "l" || jkLower === "laki") {
-      jenisKelamin = "Laki-laki";
-    } else if (jkLower === "perempuan" || jkLower === "p") {
-      jenisKelamin = "Perempuan";
-    }
+    if (jkLower === "laki-laki" || jkLower === "l" || jkLower === "laki") jenisKelamin = "Laki-laki";
+    else if (jkLower === "perempuan" || jkLower === "p") jenisKelamin = "Perempuan";
   }
 
   const validatedFields = updateUserSchema.safeParse({
+    wali_auth_id_baru: formData.get("wali_auth_id_baru") || undefined,
     nama_siswa: formData.get("nama_siswa"),
     NIS: formData.get("NIS"),
     jenis_kelamin: jenisKelamin,
@@ -140,10 +189,7 @@ export async function updateUser(prevState: AuthFormState, formData: FormData) {
       .join(" | ");
     return {
       status: "error",
-      errors: {
-        ...fieldErrors,
-        _form: [errorMessages || "Validasi form gagal"],
-      },
+      errors: { ...fieldErrors, _form: [errorMessages || "Validasi form gagal"] },
     };
   }
 
@@ -151,46 +197,87 @@ export async function updateUser(prevState: AuthFormState, formData: FormData) {
   const userId = formData.get("id") as string;
 
   if (!userId) {
-    return {
-      status: "error",
-      errors: { _form: ["ID siswa tidak ditemukan"] },
-    };
+    return { status: "error", errors: { _form: ["ID siswa tidak ditemukan"] } };
+  }
+
+  const data_ = validatedFields.data;
+
+  const updatePayload: Record<string, any> = {
+    namasiswa: data_.nama_siswa,
+    nis: data_.NIS || null,
+    jeniskelamin: data_.jenis_kelamin || null,
+    kelas: data_.kelas,
+    angkatan: data_.angkatan || null,
+    namawali: data_.nama_wali,
+    nowa: data_.no_wa,
+    tempatlahir: data_.tempat_lahir || null,
+    tanggallahir: data_.tanggal_lahir || null,
+    alamat: data_.alamat || null,
+    tipe_spp: data_.tipe_spp || "reguler",
+    updatedat: new Date().toISOString(),
+  };
+
+  let waliLamaIdUntukDibersihkan: string | null = null;
+  let deskripsiTambahan = "";
+
+  // ── Kalau bendahara pilih "pindah wali" di form Edit ini ──────────────────
+  if (data_.wali_auth_id_baru) {
+    const { data: siswaSekarang } = await supabase
+      .from("siswa")
+      .select("wali_auth_id")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (siswaSekarang && siswaSekarang.wali_auth_id !== data_.wali_auth_id_baru) {
+      const { data: waliBaruData } = await supabase
+        .from("siswa")
+        .select("email")
+        .eq("wali_auth_id", data_.wali_auth_id_baru)
+        .limit(1)
+        .maybeSingle();
+
+      if (!waliBaruData) {
+        return { status: "error", errors: { _form: ["Wali tujuan tidak ditemukan"] } };
+      }
+
+      updatePayload.wali_auth_id = data_.wali_auth_id_baru;
+      updatePayload.email = waliBaruData.email;
+      waliLamaIdUntukDibersihkan = siswaSekarang.wali_auth_id;
+      deskripsiTambahan = " — dipindahkan ke wali yang sudah terdaftar";
+    }
   }
 
   const { error: siswaError } = await supabase
     .from("siswa")
-    .update({
-      namasiswa: validatedFields.data.nama_siswa,
-      nis: validatedFields.data.NIS || null,
-      jeniskelamin: validatedFields.data.jenis_kelamin || null,
-      kelas: validatedFields.data.kelas,
-      angkatan: validatedFields.data.angkatan || null,
-      namawali: validatedFields.data.nama_wali,
-      nowa: validatedFields.data.no_wa,
-      tempatlahir: validatedFields.data.tempat_lahir || null,
-      tanggallahir: validatedFields.data.tanggal_lahir || null,
-      alamat: validatedFields.data.alamat || null,
-      tipe_spp: validatedFields.data.tipe_spp || "reguler",
-      updatedat: new Date().toISOString(),
-    })
+    .update(updatePayload)
     .eq("id", userId);
 
   if (siswaError) {
     console.error("[updateUser] Supabase error:", siswaError);
     return {
       status: "error",
-      errors: {
-        ...prevState?.errors,
-        _form: [`Gagal update: ${siswaError.message}`],
-      },
+      errors: { ...prevState?.errors, _form: [`Gagal update: ${siswaError.message}`] },
     };
+  }
+
+  // Kalau wali lama sudah tidak punya anak lain, hapus akun login-nya
+  // (kasus: tadinya salah keinput sebagai wali baru)
+  if (waliLamaIdUntukDibersihkan) {
+    const { count: sisaAnak } = await supabase
+      .from("siswa")
+      .select("id", { count: "exact", head: true })
+      .eq("wali_auth_id", waliLamaIdUntukDibersihkan);
+
+    if ((sisaAnak ?? 0) === 0) {
+      await supabase.auth.admin.deleteUser(waliLamaIdUntukDibersihkan);
+    }
   }
 
   await writeChangelog({
     supabase,
     namamenu: "Data Siswa",
     jenisaksi: "UBAH",
-    deskripsi: `Mengubah data siswa: ${validatedFields.data.nama_siswa} (SPP ${validatedFields.data.tipe_spp})`,
+    deskripsi: `Mengubah data siswa: ${data_.nama_siswa} (SPP ${data_.tipe_spp})${deskripsiTambahan}`,
   });
 
   revalidatePath("/admin/user");
@@ -290,27 +377,25 @@ export type ImportResult = {
 export async function importUsersBulk(rows: ImportRow[]): Promise<ImportResult> {
   const supabase = await createClient({ isAdmin: true });
 
-  const result: ImportResult = {
-    total: rows.length,
-    berhasil: 0,
-    gagal: 0,
-    detailGagal: [],
-  };
+  const result: ImportResult = { total: rows.length, berhasil: 0, gagal: 0, detailGagal: [] };
+
+  // Cache email → wali_auth_id, supaya baris kakak-adik dengan email sama
+  // DALAM SATU FILE otomatis nyambung ke wali yang sama — baik yang sudah
+  // ada di database, maupun yang baru saja dibuat di baris sebelumnya.
+  const emailToWaliId = new Map<string, string>();
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
-    const baris = i + 2; // +2 karena baris 1 di Excel adalah header
+    const baris = i + 2;
+    const emailLower = (row.email || "").toLowerCase().trim();
 
-    // Normalisasi jenis kelamin (sama seperti updateUser)
     const jkLower = (row.jenis_kelamin || "").toLowerCase().trim();
     let jenisKelamin: "Laki-laki" | "Perempuan" | undefined;
-    if (jkLower === "laki-laki" || jkLower === "l" || jkLower === "laki") {
-      jenisKelamin = "Laki-laki";
-    } else if (jkLower === "perempuan" || jkLower === "p") {
-      jenisKelamin = "Perempuan";
-    }
+    if (jkLower === "laki-laki" || jkLower === "l" || jkLower === "laki") jenisKelamin = "Laki-laki";
+    else if (jkLower === "perempuan" || jkLower === "p") jenisKelamin = "Perempuan";
 
     const validated = createUserSchema.safeParse({
+      mode: "baru",
       email: row.email,
       password: row.password || `siswa${row.NIS || "123456"}`,
       nama_siswa: row.nama_siswa,
@@ -328,37 +413,50 @@ export async function importUsersBulk(rows: ImportRow[]): Promise<ImportResult> 
     });
 
     if (!validated.success) {
-      const msgs = Object.values(validated.error.flatten().fieldErrors)
-        .flat()
-        .join(", ");
+      const msgs = Object.values(validated.error.flatten().fieldErrors).flat().join(", ");
       result.gagal++;
-      result.detailGagal.push({
-        baris,
-        nama: row.nama_siswa || "-",
-        pesan: msgs || "Data tidak valid",
-      });
+      result.detailGagal.push({ baris, nama: row.nama_siswa || "-", pesan: msgs || "Data tidak valid" });
       continue;
     }
 
-    const { error: authError, data } = await supabase.auth.admin.createUser({
-      email: validated.data.email,
-      password: validated.data.password,
-      email_confirm: true,
-      user_metadata: { role: "siswa", nama_siswa: validated.data.nama_siswa },
-    });
+    let waliAuthId = emailToWaliId.get(emailLower);
 
-    if (authError || !data?.user) {
-      result.gagal++;
-      result.detailGagal.push({
-        baris,
-        nama: row.nama_siswa || "-",
-        pesan: authError?.message || "Gagal membuat akun (kemungkinan email sudah dipakai)",
-      });
-      continue;
+    if (!waliAuthId) {
+      const { data: waliExisting } = await supabase
+        .from("siswa")
+        .select("wali_auth_id")
+        .eq("email", validated.data.email)
+        .limit(1)
+        .maybeSingle();
+
+      if (waliExisting) {
+        // Email ini sudah terdaftar sebagai wali → sambungkan sebagai anak baru,
+        // TIDAK bikin akun login baru.
+        waliAuthId = waliExisting.wali_auth_id;
+      } else {
+        const { error: authError, data: authData } = await supabase.auth.admin.createUser({
+          email: validated.data.email!,
+          password: validated.data.password!,
+          email_confirm: true,
+          user_metadata: { role: "siswa", nama_siswa: validated.data.nama_siswa },
+        });
+
+        if (authError || !authData?.user) {
+          result.gagal++;
+          result.detailGagal.push({
+            baris, nama: row.nama_siswa || "-",
+            pesan: authError?.message || "Gagal membuat akun",
+          });
+          continue;
+        }
+        waliAuthId = authData.user.id;
+      }
+
+      emailToWaliId.set(emailLower, waliAuthId);
     }
 
-    const { error: insertError } = await supabase.from("siswa").upsert({
-      id: data.user.id,
+    const { error: insertError } = await supabase.from("siswa").insert({
+      wali_auth_id: waliAuthId,
       email: validated.data.email,
       namasiswa: validated.data.nama_siswa,
       nis: validated.data.NIS || null,
@@ -374,14 +472,8 @@ export async function importUsersBulk(rows: ImportRow[]): Promise<ImportResult> 
     });
 
     if (insertError) {
-      // Rollback akun auth yang sudah terlanjur dibuat supaya tidak jadi akun yatim
-      await supabase.auth.admin.deleteUser(data.user.id);
       result.gagal++;
-      result.detailGagal.push({
-        baris,
-        nama: row.nama_siswa || "-",
-        pesan: insertError.message,
-      });
+      result.detailGagal.push({ baris, nama: row.nama_siswa || "-", pesan: insertError.message });
       continue;
     }
 
@@ -390,9 +482,7 @@ export async function importUsersBulk(rows: ImportRow[]): Promise<ImportResult> 
 
   if (result.berhasil > 0) {
     await writeChangelog({
-      supabase,
-      namamenu: "Data Siswa",
-      jenisaksi: "TAMBAH",
+      supabase, namamenu: "Data Siswa", jenisaksi: "TAMBAH",
       deskripsi: `Impor massal data siswa dari Excel: ${result.berhasil} berhasil, ${result.gagal} gagal`,
     });
   }

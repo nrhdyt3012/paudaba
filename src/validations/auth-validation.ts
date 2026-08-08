@@ -7,13 +7,13 @@ export const loginSchemaForm = z.object({
 });
 
 export const createUserSchema = z.object({
-  email: z.string().email("Format email tidak valid"),
-  password: z.string().min(6, "Password minimal 6 karakter"),
+  mode: z.enum(["baru", "existing"]).default("baru"),
+  wali_auth_id: z.string().optional(), // dipakai kalau mode = "existing"
+  email: z.string().optional(),
+  password: z.string().optional(),
   nama_siswa: z.string().min(1, "Nama siswa wajib diisi"),
   NIS: z.string().min(1, "NIS wajib diisi"),
-jenis_kelamin: z.enum(["Laki-laki", "Perempuan"], {
-  message: "Jenis kelamin wajib dipilih",
-}),
+  jenis_kelamin: z.enum(["Laki-laki", "Perempuan"], { message: "Jenis kelamin wajib dipilih" }),
   kelas: z.string().min(1, "Kelas wajib dipilih"),
   angkatan: z.string().min(1, "Angkatan wajib diisi"),
   nama_wali: z.string().min(1, "Nama wali wajib diisi"),
@@ -24,14 +24,28 @@ jenis_kelamin: z.enum(["Laki-laki", "Perempuan"], {
   alamat: z.string().optional(),
   tipe_spp: z.enum(["reguler", "subsidi"]).default("reguler"),
   role: z.string().default("siswa"),
+}).superRefine((data, ctx) => {
+  // Email & password HANYA wajib kalau bikin wali baru.
+  // Kalau nyambung ke wali yang sudah ada, wali_auth_id yang wajib.
+  if (data.mode === "baru") {
+    if (!data.email || !z.string().email().safeParse(data.email).success) {
+      ctx.addIssue({ path: ["email"], code: z.ZodIssueCode.custom, message: "Email wajib diisi dengan format valid" });
+    }
+    if (!data.password || data.password.length < 6) {
+      ctx.addIssue({ path: ["password"], code: z.ZodIssueCode.custom, message: "Password minimal 6 karakter" });
+    }
+  } else {
+    if (!data.wali_auth_id) {
+      ctx.addIssue({ path: ["wali_auth_id"], code: z.ZodIssueCode.custom, message: "Pilih wali terlebih dahulu" });
+    }
+  }
 });
 
 export const updateUserSchema = z.object({
+  wali_auth_id_baru: z.string().optional(), // ← baru: diisi kalau bendahara pilih "pindah wali" di form Edit
   nama_siswa: z.string().min(1, "Nama siswa wajib diisi"),
   NIS: z.string().min(1, "NIS wajib diisi"),
-jenis_kelamin: z.enum(["Laki-laki", "Perempuan"], {
-  message: "Jenis kelamin wajib dipilih",
-}),
+  jenis_kelamin: z.enum(["Laki-laki", "Perempuan"], { message: "Jenis kelamin wajib dipilih" }),
   kelas: z.string().min(1, "Kelas wajib dipilih"),
   angkatan: z.string().min(1, "Angkatan wajib diisi"),
   nama_wali: z.string().min(1, "Nama wali wajib diisi"),

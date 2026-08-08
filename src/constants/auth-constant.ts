@@ -1,6 +1,8 @@
 // src/constants/auth-constant.ts
 
 export const INITIAL_CREATE_USER_FORM = {
+  mode: "baru" as "baru" | "existing",   // ← baru
+  wali_auth_id: "",                       // ← baru
   email: "",
   password: "",
   nama_siswa: "",
@@ -13,8 +15,6 @@ export const INITIAL_CREATE_USER_FORM = {
   email_wali: "",
   tempat_lahir: "",
   tanggal_lahir: "",
-  // FIX: tambah default value alamat — sebelumnya tidak ada di sini,
-  // berpotensi field alamat tidak ke-submit dengan benar di form Tambah.
   alamat: "",
   tipe_spp: "reguler" as "reguler" | "subsidi",
   role: "siswa",
