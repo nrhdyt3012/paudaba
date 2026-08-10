@@ -3,15 +3,9 @@
 import DataTable from "@/components/common/data-table";
 import DropdownAction from "@/components/common/dropdown-action";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import useDataTable from "@/hooks/use-data-table";
 import { createClient } from "@/lib/supabase/client";
 import { convertIDR, cn } from "@/lib/utils";
@@ -24,8 +18,11 @@ import {
   Trash2,
   Banknote,
   Lock,
+  MessageSquare,
+  Loader2,
+  ChevronDown,
 } from "lucide-react";
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import DialogDeleteTagihanSiswa from "./dialog-delete-tagihan-siswa";
@@ -36,32 +33,32 @@ const BULAN_NAMA = [
   "Juli", "Agustus", "September", "Oktober", "November", "Desember",
 ];
 
+// FIX: opsi filter kelas & status sekarang dipakai sebagai daftar checkbox
+// di dropdown multi-select custom (lihat komponen MultiSelectDropdown di
+// bawah), bukan lagi <Select> single-value. Tidak ada lagi opsi "semua"
+// karena array kosong = tanpa filter = tampilkan semua.
 const KELAS_OPTIONS = [
-  { value: "semua", label: "Semua Kelas" },
   { value: "KB", label: "KB" },
   { value: "TK A", label: "TK A" },
   { value: "TK B", label: "TK B" },
 ];
 
-// FIX: sebelumnya cuma 2 opsi (Sudah Bayar/Belum Bayar) padahal status
-// yang sebenarnya ada di kolom `statuspembayaran` ada 3: LUNAS, BELUM
-// LUNAS (sudah bayar sebagian/cicilan), dan BELUM BAYAR (belum bayar
-// sama sekali). Sekarang ketiganya jadi opsi filter terpisah, sesuai
-// juga dengan 3 warna badge yang sudah ada di kolom Status tabel.
 const STATUS_OPTIONS = [
-  { value: "semua", label: "Semua Status" },
   { value: "LUNAS", label: "Sudah Bayar" },
   { value: "BELUM LUNAS", label: "Belum Lunas" },
   { value: "BELUM BAYAR", label: "Belum Bayar" },
 ];
 
+// Jeda pengiriman reminder massal dari halaman ini — pola sama seperti di
+// halaman Reminder Tunggakan (anti-banned Fonnte: 30-60 detik antar siswa).
+const MIN_DELAY_MS = 30_000;
+const MAX_DELAY_MS = 60_000;
+const randomDelay = () =>
+  Math.floor(Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS + 1)) + MIN_DELAY_MS;
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 function getTagihanPermissions(item: any) {
   const pembayaran: any[] = item.pembayaran ?? [];
-  // FIX: "transfer" itu pembayaran manual (sama seperti "cash"), BUKAN
-  // via Midtrans — sebelumnya cuma "cash" yang dikecualikan, jadi
-  // pembayaran "transfer" (walau baru cicilan/parsial) ikut ke-anggap
-  // "via Midtrans" dan mengunci tagihan padahal belum lunas sama sekali.
-  // Disamakan dengan logic yang sama di actions.ts (getTagihanPermission).
   const hasMidtrans = pembayaran.some(
     (p) =>
       p.statuspembayaran === "SUCCESS" &&
@@ -70,9 +67,6 @@ function getTagihanPermissions(item: any) {
   );
   const hasAnySuccess = pembayaran.some((p) => p.statuspembayaran === "SUCCESS");
 
-  // FIX: label "via ..." sekarang mengikuti metode transaksi SUCCESS yang
-  // sebenarnya (cash/transfer/midtrans), bukan cuma tebakan biner cash-vs-
-  // midtrans seperti sebelumnya (yang bikin transfer ke-label "via Cash").
   const successPembayaran = pembayaran.find((p) => p.statuspembayaran === "SUCCESS");
   const metodeLabel =
     successPembayaran?.metodepembayaran === "transfer"
@@ -83,10 +77,85 @@ function getTagihanPermissions(item: any) {
 
   return {
     canBayarManual: !hasMidtrans && item.statuspembayaran !== "LUNAS",
+    // canDelete = belum pernah ada pembayaran SUCCESS sama sekali (murni
+    // BELUM BAYAR). Ini juga jadi dasar tombol "Hapus Tagihan Terpilih".
     canDelete: !hasAnySuccess,
     hasMidtrans,
     metodeLabel,
   };
+}
+
+// ─── Dropdown filter multi-select (checkbox) sederhana, tanpa dependency
+// tambahan selain Button & Checkbox yang sudah ada di project ────────────
+function MultiSelectDropdown({
+  label,
+  options,
+  selected,
+  onChange,
+}: {
+  label: string;
+  options: { value: string; label: string }[];
+  selected: string[];
+  onChange: (values: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const toggleValue = (value: string) => {
+    if (selected.includes(value)) onChange(selected.filter((v) => v !== value));
+    else onChange([...selected, value]);
+  };
+
+  const displayLabel = selected.length === 0 ? label : `${label} (${selected.length})`;
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <Button
+        type="button"
+        variant="outline"
+        onClick={() => setOpen((o) => !o)}
+        className="w-[150px] justify-between font-normal"
+      >
+        <span className="truncate">{displayLabel}</span>
+        <ChevronDown className={cn("h-4 w-4 shrink-0 transition-transform", open && "rotate-180")} />
+      </Button>
+      {open && (
+        <div className="absolute z-50 mt-1 w-[200px] rounded-md border bg-popover p-2 shadow-md">
+          {options.map((opt) => (
+            <label
+              key={opt.value}
+              className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted cursor-pointer"
+            >
+              <Checkbox
+                checked={selected.includes(opt.value)}
+                onCheckedChange={() => toggleValue(opt.value)}
+              />
+              {opt.label}
+            </label>
+          ))}
+          {selected.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onChange([])}
+              className="mt-1 w-full text-left text-xs text-muted-foreground hover:text-foreground px-2 py-1"
+            >
+              Reset filter
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function DaftarTagihanSiswa() {
@@ -98,20 +167,16 @@ export default function DaftarTagihanSiswa() {
     handleChangePage, handleChangeLimit, handleChangeSearch,
   } = useDataTable();
 
-  const [filterKelas, setFilterKelas] = useState("semua");
-  const [filterStatus, setFilterStatus] = useState("semua");
+  // FIX: filterKelas & filterStatus sekarang array (multi-select).
+  // Array kosong = tidak ada filter = tampilkan semua.
+  const [filterKelas, setFilterKelas] = useState<string[]>([]);
+  const [filterStatus, setFilterStatus] = useState<string[]>([]);
 
   const { data: stats, refetch: refetchStats } = useQuery({
     queryKey: ["tagihan-admin-stats"],
     queryFn: async () => {
       const { count: total } = await supabase
         .from("tagihan_siswa").select("*", { count: "exact", head: true });
-      // FIX: nama variabel & label kartu diperbaiki jadi "Belum Lunas"
-      // (dulu ditulis "belumBayar" & kartu berlabel "Belum Bayar")
-      // — angkanya tetap gabungan BELUM BAYAR + BELUM LUNAS seperti
-      // semula, cuma penamaannya yang lebih akurat sekarang. Filter
-      // dropdown Status di atas tetap punya 3 opsi terpisah untuk
-      // drill-down yang lebih detail kalau dibutuhkan.
       const { count: belumLunas } = await supabase
         .from("tagihan_siswa").select("*", { count: "exact", head: true })
         .in("statuspembayaran", ["BELUM BAYAR", "BELUM LUNAS"]);
@@ -128,16 +193,15 @@ export default function DaftarTagihanSiswa() {
       let query = supabase
         .from("tagihan_siswa")
         .select(
-          // FIX: namatagihan, jenjang, DAN jenistagihan sekarang semuanya
-          // dibaca dari kolom SNAPSHOT di tagihan_siswa sendiri — join ke
-          // master_tagihan sudah tidak diperlukan lagi sama sekali di sini.
-          `*, siswa!idsiswa(id, namasiswa, kelas),
+          `*, siswa!idsiswa(id, namasiswa, kelas, nowa),
           pembayaran(idpembayaran, statuspembayaran, metodepembayaran)`,
           { count: "exact" }
         );
 
-      if (filterStatus !== "semua") query = query.eq("statuspembayaran", filterStatus);
-      if (filterKelas !== "semua") query = query.eq("siswa.kelas", filterKelas);
+      // FIX: filter status & kelas sekarang pakai .in() dengan array,
+      // hanya diterapkan kalau ada minimal 1 opsi yang dipilih.
+      if (filterStatus.length > 0) query = query.in("statuspembayaran", filterStatus);
+      if (filterKelas.length > 0) query = query.in("siswa.kelas", filterKelas);
 
       if (currentSearch) {
         query = query.or(
@@ -152,8 +216,11 @@ export default function DaftarTagihanSiswa() {
       if (error) toast.error("Gagal memuat tagihan", { description: error.message });
 
       let result = data || [];
-      if (filterKelas !== "semua") {
-        result = result.filter((item: any) => item.siswa?.kelas === filterKelas);
+      // Filter ulang di client karena .in() pada relasi embed tidak selalu
+      // mengecualikan baris induk yang tidak match (sama seperti perilaku
+      // .eq() sebelumnya untuk kelas).
+      if (filterKelas.length > 0) {
+        result = result.filter((item: any) => filterKelas.includes(item.siswa?.kelas));
       }
 
       return { data: result, count: count || 0 };
@@ -162,6 +229,12 @@ export default function DaftarTagihanSiswa() {
 
   const [selectedAction, setSelectedAction] = useState<{ data: any; type: "bayar" | "delete" } | null>(null);
   const handleChangeAction = (open: boolean) => { if (!open) setSelectedAction(null); };
+
+  // FIX: state untuk seleksi baris (checkbox) + aksi massal (reminder & hapus)
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  const [isSendingReminder, setIsSendingReminder] = useState(false);
+  const [reminderProgress, setReminderProgress] = useState({ done: 0, total: 0 });
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
   const invalidateTagihanQueries = () => {
     queryClient.invalidateQueries({ queryKey: ["tagihan-siswa-list"] });
@@ -178,10 +251,144 @@ export default function DaftarTagihanSiswa() {
     return () => { channel.unsubscribe(); };
   }, []);
 
+  // FIX: reset seleksi setiap kali halaman/limit/pencarian/filter berubah,
+  // supaya tidak ada baris "terpilih hantu" yang sudah tidak tampil lagi.
+  useEffect(() => {
+    setSelectedRows(new Set());
+  }, [currentPage, currentLimit, currentSearch, filterKelas, filterStatus]);
+
+  const rawItems: any[] = tagihanList?.data || [];
+
+  const toggleRow = (id: number) => {
+    setSelectedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const isAllOnPageSelected = rawItems.length > 0 && rawItems.every((i) => selectedRows.has(i.idtagihansiswa));
+  const toggleSelectAllOnPage = () => {
+    if (isAllOnPageSelected) setSelectedRows(new Set());
+    else setSelectedRows(new Set(rawItems.map((i) => i.idtagihansiswa)));
+  };
+  const clearSelection = () => setSelectedRows(new Set());
+
+  const selectedItems = useMemo(
+    () => rawItems.filter((item) => selectedRows.has(item.idtagihansiswa)),
+    [rawItems, selectedRows]
+  );
+
+  // FIX: hapus massal hanya boleh kalau SEMUA tagihan terpilih memang
+  // belum pernah punya riwayat pembayaran SUCCESS sama sekali (canDelete).
+  // Kalau salah satu saja sudah pernah dibayar (termasuk BELUM LUNAS /
+  // cicilan), tombol hapus terpilih akan disable & pudar.
+  const canBulkDelete =
+    selectedItems.length > 0 && selectedItems.every((item) => getTagihanPermissions(item).canDelete);
+
+  const handleKirimReminderTerpilih = async () => {
+    // Kelompokkan tagihan terpilih per siswa, biar siswa yang punya
+    // beberapa tagihan tertunggak yang dipilih sekaligus cuma dikirimi
+    // 1 pesan (bukan 1 pesan per tagihan).
+    const map = new Map<string, { idsiswa: string; namasiswa: string; nowa: string; tagihanIds: number[] }>();
+    let skippedNoWa = 0;
+
+    selectedItems.forEach((item) => {
+      const nowa = item.siswa?.nowa;
+      if (!nowa || nowa.length < 10) {
+        skippedNoWa++;
+        return;
+      }
+      if (!map.has(item.siswa.id)) {
+        map.set(item.siswa.id, {
+          idsiswa: item.siswa.id,
+          namasiswa: item.siswa.namasiswa,
+          nowa,
+          tagihanIds: [],
+        });
+      }
+      map.get(item.siswa.id)!.tagihanIds.push(item.idtagihansiswa);
+    });
+
+    const targets = Array.from(map.values());
+
+    if (targets.length === 0) {
+      toast.error("Tidak ada siswa dengan nomor WhatsApp valid pada tagihan yang dipilih");
+      return;
+    }
+    if (skippedNoWa > 0) {
+      toast.warning(`${skippedNoWa} tagihan dilewati karena siswa tidak punya No. WA valid`);
+    }
+
+    setIsSendingReminder(true);
+    setReminderProgress({ done: 0, total: targets.length });
+
+    let success = 0;
+    let failed = 0;
+
+    for (let i = 0; i < targets.length; i++) {
+      const g = targets[i];
+      try {
+        const res = await fetch("/api/notifications/send-bill-massal", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idSiswa: g.idsiswa, idTagihanList: g.tagihanIds }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Gagal mengirim");
+        success++;
+      } catch {
+        failed++;
+      }
+      setReminderProgress({ done: i + 1, total: targets.length });
+      if (i < targets.length - 1) await delay(randomDelay());
+    }
+
+    setIsSendingReminder(false);
+    clearSelection();
+    invalidateTagihanQueries();
+
+    if (failed === 0) toast.success(`Reminder terkirim ke ${success} wali siswa`);
+    else toast.warning(`Terkirim ${success}, gagal ${failed}. Coba lagi untuk yang gagal.`);
+  };
+
+  const handleHapusTerpilih = async () => {
+    if (!canBulkDelete) return;
+    const ids = selectedItems.map((item) => item.idtagihansiswa);
+
+    // NOTE: pakai window.confirm sebagai konfirmasi cepat karena saya tidak
+    // punya akses ke komponen dialog konfirmasi kustom kamu. Kalau ada
+    // komponen AlertDialog di project, ini bisa diganti supaya tampilannya
+    // konsisten dengan dialog-dialog lain.
+    const confirmed = window.confirm(
+      `Hapus ${ids.length} tagihan terpilih? Tindakan ini tidak bisa dibatalkan.`
+    );
+    if (!confirmed) return;
+
+    setIsBulkDeleting(true);
+    const { error } = await supabase.from("tagihan_siswa").delete().in("idtagihansiswa", ids);
+    setIsBulkDeleting(false);
+
+    if (error) {
+      toast.error("Gagal menghapus tagihan", { description: error.message });
+      return;
+    }
+    toast.success(`${ids.length} tagihan berhasil dihapus`);
+    clearSelection();
+    invalidateTagihanQueries();
+  };
+
   const filteredData = useMemo(() => {
-    return (tagihanList?.data || []).map((item: any, index: number) => {
+    return rawItems.map((item: any, index: number) => {
       const perms = getTagihanPermissions(item);
       return [
+        // FIX: kolom checkbox seleksi baris — ditaruh paling kiri sebelum "No"
+        <Checkbox
+          key={`sel-${item.idtagihansiswa}`}
+          checked={selectedRows.has(item.idtagihansiswa)}
+          onCheckedChange={() => toggleRow(item.idtagihansiswa)}
+        />,
         currentLimit * (currentPage - 1) + index + 1,
         <span key={`id-${item.idtagihansiswa}`} className="font-mono text-sm">#{item.idtagihansiswa}</span>,
         <div key={`siswa-${item.idtagihansiswa}`}>
@@ -189,8 +396,6 @@ export default function DaftarTagihanSiswa() {
           <p className="text-xs text-muted-foreground">{item.siswa?.kelas || ""}</p>
         </div>,
         <div key={`tagihan-${item.idtagihansiswa}`}>
-          {/* FIX: baca dari kolom snapshot langsung (item.namatagihan,
-              item.jenjang), bukan lagi item.master_tagihan?.* */}
           <p className="font-semibold">{item.namatagihan || "-"}</p>
           <p className="text-xs text-muted-foreground">
             {item.bulan}/{item.tahun} · {item.jenjang || ""}
@@ -230,10 +435,6 @@ export default function DaftarTagihanSiswa() {
         new Date(item.createdat).toLocaleDateString("id-ID", {
           day: "numeric", month: "short", year: "numeric",
         }),
-        // FIX (klarifikasi): kolom baru "Periode Ditagihkan" — bukan
-        // "Jenis". Isinya bulan/tahun yang dipilih admin waktu menerbitkan
-        // tagihan ini (langkah setelah memilih Master Tagihan di form Buat
-        // Tagihan), ditampilkan sebagai "Juli 2026" dst.
         <span
           key={`periode-${item.idtagihansiswa}`}
           className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-100 whitespace-nowrap"
@@ -278,47 +479,96 @@ export default function DaftarTagihanSiswa() {
         />,
       ];
     });
-  }, [tagihanList, currentLimit, currentPage]);
+  }, [rawItems, currentLimit, currentPage, selectedRows]);
 
   return (
     <div className="w-full space-y-6">
-      <div className="flex flex-col lg:flex-row mb-4 gap-2 justify-between w-full">
-        <div>
-          <h1 className="text-2xl font-bold">Tagihan Siswa</h1>
-          <p className="text-sm text-muted-foreground">Kelola tagihan pembayaran siswa</p>
+      {selectedRows.size > 0 ? (
+        // FIX: baris toolbar utama (judul + filter + tombol "Buat Tagihan")
+        // digantikan sementara oleh action bar ini selama ada baris terpilih.
+        <div className="flex flex-col lg:flex-row items-start lg:items-center mb-4 gap-3 justify-between w-full rounded-lg border bg-muted/40 p-3">
+          <div className="flex items-center gap-3">
+            <span className="font-semibold text-sm">{selectedRows.size} tagihan dipilih</span>
+            <Button variant="ghost" size="sm" onClick={clearSelection} disabled={isSendingReminder || isBulkDeleting}>
+              Batal
+            </Button>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleKirimReminderTerpilih}
+              disabled={isSendingReminder || isBulkDeleting}
+              className="text-blue-600 border-blue-200 hover:bg-blue-50"
+            >
+              {isSendingReminder ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <MessageSquare className="w-4 h-4 mr-2" />
+              )}
+              {isSendingReminder
+                ? `Mengirim ${reminderProgress.done}/${reminderProgress.total}...`
+                : "Kirim Reminder Tunggakan"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleHapusTerpilih}
+              disabled={!canBulkDelete || isBulkDeleting || isSendingReminder}
+              title={
+                !canBulkDelete
+                  ? "Hanya tagihan berstatus Belum Bayar (tanpa riwayat pembayaran) yang bisa dihapus sekaligus"
+                  : undefined
+              }
+              className={cn(
+                "border-red-200",
+                canBulkDelete ? "text-red-600 hover:bg-red-50" : "text-gray-400 opacity-50 cursor-not-allowed"
+              )}
+            >
+              {isBulkDeleting ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Trash2 className="w-4 h-4 mr-2" />
+              )}
+              Hapus Tagihan Terpilih
+            </Button>
+          </div>
         </div>
-        <div className="flex flex-col sm:flex-row gap-2">
-          <Input
-            placeholder="Cari siswa atau tagihan..."
-            onChange={(e) => handleChangeSearch(e.target.value)}
-            className="max-w-sm"
-          />
-          <Select value={filterKelas} onValueChange={setFilterKelas}>
-            <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {KELAS_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {STATUS_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      ) : (
+        <div className="flex flex-col lg:flex-row mb-4 gap-2 justify-between w-full">
+          <div>
+            <h1 className="text-2xl font-bold">Tagihan Siswa</h1>
+            <p className="text-sm text-muted-foreground">Kelola tagihan pembayaran siswa</p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Input
+              placeholder="Cari siswa atau tagihan..."
+              onChange={(e) => handleChangeSearch(e.target.value)}
+              className="max-w-sm"
+            />
+            <MultiSelectDropdown
+              label="Kelas"
+              options={KELAS_OPTIONS}
+              selected={filterKelas}
+              onChange={setFilterKelas}
+            />
+            <MultiSelectDropdown
+              label="Status"
+              options={STATUS_OPTIONS}
+              selected={filterStatus}
+              onChange={setFilterStatus}
+            />
 
-          <Button
-            className="bg-green-600 hover:bg-green-700"
-            onClick={() => router.push("/admin/tagihan/buat")}
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Buat Tagihan
-          </Button>
+            <Button
+              className="bg-green-600 hover:bg-green-700"
+              onClick={() => router.push("/admin/tagihan/buat")}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Buat Tagihan
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <Card>
@@ -330,7 +580,7 @@ export default function DaftarTagihanSiswa() {
             <div className="text-2xl font-bold">{stats?.total || 0}</div>
           </CardContent>
         </Card>
-                <Card>
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm">Belum Lunas</CardTitle>
             <AlertCircle className="h-4 w-4 text-red-500" />
@@ -348,14 +598,17 @@ export default function DaftarTagihanSiswa() {
             <div className="text-2xl font-bold text-green-600">{stats?.lunas || 0}</div>
           </CardContent>
         </Card>
-        {/* FIX: nama kartu diperbaiki dari "Belum Bayar" jadi "Belum
-            Lunas" — lebih akurat karena angkanya memang gabungan status
-            BELUM BAYAR dan BELUM LUNAS (bukan cuma yang benar-benar
-            belum bayar sepeser pun). */}
       </div>
 
+      {rawItems.length > 0 && (
+        <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer w-fit">
+          <Checkbox checked={isAllOnPageSelected} onCheckedChange={toggleSelectAllOnPage} />
+          Pilih semua di halaman ini ({rawItems.length})
+        </label>
+      )}
+
       <DataTable
-        header={["No", "ID", "Nama Siswa", "Tagihan", "Nominal", "Sisa Tagihan", "Status", "Tanggal", "Periode Ditagihkan", "Aksi"]}
+        header={["", "No", "ID", "Nama Siswa", "Tagihan", "Nominal", "Sisa Tagihan", "Status", "Tanggal", "Periode Ditagihkan", "Aksi"]}
         data={filteredData}
         isLoading={isLoading}
         totalPages={tagihanList?.count ? Math.ceil(tagihanList.count / currentLimit) : 0}

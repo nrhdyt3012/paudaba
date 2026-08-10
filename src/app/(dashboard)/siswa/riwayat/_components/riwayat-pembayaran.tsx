@@ -80,33 +80,33 @@ export default function RiwayatPembayaran() {
   const [filterStatus, setFilterStatus] = useState("semua");
 
   // FIX: profil sekolah dinamis, dipakai untuk header/footer di kwitansi
-  // dan laporan riwayat. Sesuaikan nama tabel & kolom dengan skema
-  // Supabase kamu yang sebenarnya.
-const { data: sekolahInfo } = useQuery({
-  queryKey: ["pengaturan-sekolah"],
-  queryFn: async (): Promise<SekolahInfo | null> => {
-    const { data, error } = await supabase
-      .from("pengaturan_sekolah")
-      .select("nama_sekolah, alamat_sekolah, logo_url, nama_bendahara, tanda_tangan_bendahara_url")
-      .eq("id", 1)
-      .maybeSingle();
+  // dan laporan riwayat. Nama kolom disesuaikan dengan skema tabel
+  // pengaturan_sekolah yang sebenarnya (tanda_tangan_bendahara_url).
+  const { data: sekolahInfo } = useQuery({
+    queryKey: ["pengaturan-sekolah"],
+    queryFn: async (): Promise<SekolahInfo | null> => {
+      const { data, error } = await supabase
+        .from("pengaturan_sekolah")
+        .select("nama_sekolah, alamat_sekolah, logo_url, nama_bendahara, tanda_tangan_bendahara_url")
+        .eq("id", 1)
+        .maybeSingle();
 
-    if (error) {
-      toast.error("Gagal memuat data sekolah", { description: error.message });
-      return null;
-    }
-    if (!data) return null;
+      if (error) {
+        toast.error("Gagal memuat data sekolah", { description: error.message });
+        return null;
+      }
+      if (!data) return null;
 
-    return {
-      namaSekolah: data.nama_sekolah,
-      alamatSekolah: data.alamat_sekolah,
-      logoUrl: data.logo_url,
-      namaBendahara: data.nama_bendahara,
-      tandaTanganUrl: data.tanda_tangan_bendahara_url,
-    };
-  },
-  staleTime: 5 * 60 * 1000,
-});
+      return {
+        namaSekolah: data.nama_sekolah,
+        alamatSekolah: data.alamat_sekolah,
+        logoUrl: data.logo_url,
+        namaBendahara: data.nama_bendahara,
+        tandaTanganUrl: data.tanda_tangan_bendahara_url,
+      };
+    },
+    staleTime: 5 * 60 * 1000, // data jarang berubah, cache 5 menit
+  });
 
   const { data: siswaData } = useQuery({
     queryKey: ["siswa-self-riwayat", activeSiswaId],
@@ -262,7 +262,7 @@ const { data: sekolahInfo } = useQuery({
           <CardHeader className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
             <CardTitle className="shrink-0">Daftar Riwayat Tagihan</CardTitle>
             {/* FIX: search bar + filter status + tombol cetak laporan
-                menyeluruh, sejajar dengan judul "Daftar Riwayat Tagihan". */}
+                riwayat, sejajar dengan judul "Daftar Riwayat Tagihan". */}
             <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
               <div className="relative w-full sm:w-64">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -482,9 +482,8 @@ function PrintButtonLaporanMenyeluruh({
 
   const totalDibayarKeseluruhan = allItems.reduce((s, it) => s + it.jumlahDibayar, 0);
 
-  // Dipakai untuk baris ringkasan "Total Tunggakan" (jumlah tagihan) &
-  // "Sisa" (total nominal belum lunas) di bawah tabel — bukan lagi
-  // ditampilkan sebagai tabel rincian terpisah.
+  // Dipakai untuk hitung totalSisaBelumLunas (baris "Sisa") — nilai per
+  // tagihan yang statusnya belum LUNAS.
   const tagihanBelumLunas: TagihanBelumLunasItem[] = riwayatList
     .filter((t) => t.statuspembayaran !== "LUNAS")
     .sort((a, b) => (a.tahun * 12 + a.bulan) - (b.tahun * 12 + b.bulan))
@@ -502,6 +501,14 @@ function PrintButtonLaporanMenyeluruh({
     });
 
   const totalSisaBelumLunas = tagihanBelumLunas.reduce((s, t) => s + t.sisaTagihan, 0);
+
+  // FIX: total nominal SEMUA tagihan siswa ini (lunas + belum lunas),
+  // dipakai untuk baris "Total Tagihan Keseluruhan" di laporan, supaya:
+  // totalTagihanKeseluruhan - totalDibayarKeseluruhan = totalSisaBelumLunas
+  const totalTagihanKeseluruhan = riwayatList.reduce(
+    (s, t) => s + parseFloat(t.jumlahtagihan),
+    0
+  );
 
   const sekolahData: SekolahInfo = {
     namaSekolah: sekolah?.namaSekolah || "-",
@@ -521,6 +528,7 @@ function PrintButtonLaporanMenyeluruh({
     totalDibayarKeseluruhan,
     tagihanBelumLunas,
     totalSisaBelumLunas,
+    totalTagihanKeseluruhan,
     sekolah: sekolahData,
   };
 

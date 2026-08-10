@@ -5,6 +5,7 @@
 // FIX: tabel rincian "Tagihan Belum Lunas" dihapus — cukup diringkas di
 // 3 baris ringkasan di bawah tabel riwayat. Kolom "Sisa" pada tabel riwayat
 // dipecah jadi 2 kolom terpisah: "Sisa" (nominal) dan "Status" (badge).
+// Ringkasan 3 baris: Total Dibayar - Total Tagihan Keseluruhan = Sisa.
 
 import type { SekolahInfo } from "./kwitansi-template"; // re-use tipe yang sama
 
@@ -36,10 +37,12 @@ export interface LaporanRiwayatData {
   jamCetak: string;
   items: LaporanRiwayatItem[];
   totalDibayarKeseluruhan: number;
-  // FIX: tetap dikirim (dipakai untuk hitung jumlah tunggakan & total sisa
-  // di 3 baris ringkasan), meski tabel rinciannya sudah tidak ditampilkan.
   tagihanBelumLunas: TagihanBelumLunasItem[];
   totalSisaBelumLunas: number;
+  // FIX: total nominal SEMUA tagihan siswa (lunas + belum lunas), dipakai
+  // untuk baris "Total Tagihan Keseluruhan" — supaya rumus
+  // totalTagihanKeseluruhan - totalDibayarKeseluruhan = totalSisaBelumLunas
+  totalTagihanKeseluruhan: number;
   sekolah: SekolahInfo;
 }
 
@@ -152,8 +155,8 @@ export default function LaporanRiwayatTemplate({ data }: { data: LaporanRiwayatD
         </tbody>
       </table>
 
-      {/* FIX: Ringkasan dipisah dari tabel, dengan jarak, 3 baris */}
-{/* FIX: Ringkasan dipisah dari tabel, dengan jarak, 3 baris */}
+      {/* Ringkasan dipisah dari tabel, dengan jarak, 3 baris:
+          Total Dibayar - Total Tagihan Keseluruhan = Sisa */}
       <div className="mt-8 max-w-xs ml-auto text-sm space-y-1.5">
         <div className="flex justify-between">
           <span className="text-gray-700">Total Keseluruhan Dibayar</span>
@@ -162,9 +165,9 @@ export default function LaporanRiwayatTemplate({ data }: { data: LaporanRiwayatD
           </span>
         </div>
         <div className="flex justify-between">
-          <span className="text-gray-700">Total Tunggakan yang Dimiliki</span>
+          <span className="text-gray-700">Total Tagihan Keseluruhan</span>
           <span className="font-semibold">
-            Rp{formatRupiah(data.totalSisaBelumLunas)}
+            Rp{formatRupiah(data.totalTagihanKeseluruhan)}
           </span>
         </div>
         <div className="flex justify-between border-t border-gray-300 pt-1.5">
