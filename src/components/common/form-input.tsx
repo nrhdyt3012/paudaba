@@ -28,6 +28,7 @@ export default function FormInput<T extends FieldValues>({
   label,
   placeholder,
   type = "text",
+  disabled = false,
 }: {
   form: UseFormReturn<T>;
   name: Path<T>;
@@ -36,6 +37,10 @@ export default function FormInput<T extends FieldValues>({
   // FIX: tambah "currency" — tampilan angka otomatis pakai titik ribuan
   // (mis. 700.000), tapi value yang disimpan di form tetap angka murni.
   type?: string;
+  // FIX: dukung field yang perlu dikunci (mis. email wali otomatis-isi
+  // saat mode "existing" dipilih di form-user.tsx), diteruskan ke semua
+  // varian Input/Textarea di bawah.
+  disabled?: boolean;
 }) {
   // FIX: state show/hide khusus untuk field bertipe "password" — dipakai
   // untuk toggle ikon mata (Eye/EyeOff). Karena tiap FormInput adalah
@@ -59,6 +64,7 @@ export default function FormInput<T extends FieldValues>({
                 onChange={onChange}
                 placeholder={placeholder}
                 autoComplete="off"
+                disabled={disabled}
                 className="resize-none"
               />
             ) : type === "currency" ? (
@@ -78,6 +84,7 @@ export default function FormInput<T extends FieldValues>({
                   }}
                   placeholder={placeholder}
                   autoComplete="off"
+                  disabled={disabled}
                   className="pl-9"
                 />
               </div>
@@ -94,13 +101,15 @@ export default function FormInput<T extends FieldValues>({
                   type={showPassword ? "text" : "password"}
                   placeholder={placeholder}
                   autoComplete="off"
+                  disabled={disabled}
                   className="pr-10"
                 />
                 <button
                   type="button"
                   tabIndex={-1}
                   onClick={() => setShowPassword((prev) => !prev)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  disabled={disabled}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 disabled:pointer-events-none"
                   aria-label={showPassword ? "Sembunyikan password" : "Tampilkan password"}
                 >
                   {showPassword ? (
@@ -118,6 +127,7 @@ export default function FormInput<T extends FieldValues>({
                 type={type}
                 placeholder={placeholder}
                 autoComplete="off"
+                disabled={disabled}
               />
             )}
           </FormControl>

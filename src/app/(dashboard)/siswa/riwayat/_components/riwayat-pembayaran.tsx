@@ -18,7 +18,7 @@ import { toast } from "sonner";
 import { Loader2, Receipt, Printer, ChevronDown, ChevronUp, FileStack, Search, PrinterIcon } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
-import KwitansiTemplate, { KwitansiData } from "@/components/common/kwitansi-template";
+import KwitansiTemplate, { KwitansiData, SekolahInfo } from "@/components/common/kwitansi-template";
 import LaporanRiwayatTemplate, {
   LaporanRiwayatData,
   TagihanBelumLunasItem,
@@ -78,6 +78,35 @@ export default function RiwayatPembayaran() {
   const [expandedTagihan, setExpandedTagihan] = useState<Set<number>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("semua");
+
+  // FIX: profil sekolah dinamis, dipakai untuk header/footer di kwitansi
+  // dan laporan riwayat. Sesuaikan nama tabel & kolom dengan skema
+  // Supabase kamu yang sebenarnya.
+const { data: sekolahInfo } = useQuery({
+  queryKey: ["pengaturan-sekolah"],
+  queryFn: async (): Promise<SekolahInfo | null> => {
+    const { data, error } = await supabase
+      .from("pengaturan_sekolah")
+      .select("nama_sekolah, alamat_sekolah, logo_url, nama_bendahara, tanda_tangan_bendahara_url")
+      .eq("id", 1)
+      .maybeSingle();
+
+    if (error) {
+      toast.error("Gagal memuat data sekolah", { description: error.message });
+      return null;
+    }
+    if (!data) return null;
+
+    return {
+      namaSekolah: data.nama_sekolah,
+      alamatSekolah: data.alamat_sekolah,
+      logoUrl: data.logo_url,
+      namaBendahara: data.nama_bendahara,
+      tandaTanganUrl: data.tanda_tangan_bendahara_url,
+    };
+  },
+  staleTime: 5 * 60 * 1000,
+});
 
   const { data: siswaData } = useQuery({
     queryKey: ["siswa-self-riwayat", activeSiswaId],
@@ -252,7 +281,11 @@ export default function RiwayatPembayaran() {
                   ))}
                 </SelectContent>
               </Select>
-              <PrintButtonLaporanMenyeluruh riwayatList={riwayatList} siswaData={siswaData} />
+              <PrintButtonLaporanMenyeluruh
+                riwayatList={riwayatList}
+                siswaData={siswaData}
+                sekolah={sekolahInfo}
+              />
             </div>
           </CardHeader>
           <CardContent>
@@ -382,6 +415,7 @@ export default function RiwayatPembayaran() {
                                           indexTransaksi={pIdx + 1}
                                           totalTagihan={totalTagihan}
                                           sisaTagihanBelumBayar={sisaTagihanList || []}
+                                          sekolah={sekolahInfo}
                                         />
                                       </div>
                                     ))}
@@ -404,24 +438,25 @@ export default function RiwayatPembayaran() {
   );
 }
 
-// ─── Tombol cetak laporan tagihan MENYELURUH (riwayat pembayaran + rincian
-// tagihan yang belum lunas) ─────────────────────────────────────────────────
+// ─── Tombol cetak laporan riwayat pembayaran ───────────────────────────────
 function PrintButtonLaporanMenyeluruh({
   riwayatList,
   siswaData,
+  sekolah,
 }: {
   riwayatList: TagihanItem[];
   siswaData: any;
+  sekolah: SekolahInfo | null | undefined;
 }) {
   const contentRef = useRef<HTMLDivElement>(null);
   const handlePrint = useReactToPrint({
     contentRef,
-    documentTitle: `Laporan-Tagihan-${siswaData?.namasiswa || "Siswa"}`,
+    documentTitle: `Laporan-Riwayat-${siswaData?.namasiswa || "Siswa"}`,
   });
 
   const now = new Date();
 
-  // Tabel 1: rangkum SEMUA transaksi dari SEMUA tagihan jadi satu list, urut
+  // Tabel: rangkum SEMUA transaksi dari SEMUA tagihan jadi satu list, urut
   // kronologis (paling lama duluan) — persis seperti mutasi rekening.
   const allItems = riwayatList
     .flatMap((tagihan) =>
@@ -447,10 +482,9 @@ function PrintButtonLaporanMenyeluruh({
 
   const totalDibayarKeseluruhan = allItems.reduce((s, it) => s + it.jumlahDibayar, 0);
 
-  // BARU — Tabel 2: rincian tagihan yang statusnya belum LUNAS, diambil dari
-  // data tagihan_siswa TERKINI (bukan dari histori pembayaran), supaya wali
-  // siswa tahu persis sisa tagihan yang masih harus dibayar saat laporan
-  // ini dicetak.
+  // Dipakai untuk baris ringkasan "Total Tunggakan" (jumlah tagihan) &
+  // "Sisa" (total nominal belum lunas) di bawah tabel — bukan lagi
+  // ditampilkan sebagai tabel rincian terpisah.
   const tagihanBelumLunas: TagihanBelumLunasItem[] = riwayatList
     .filter((t) => t.statuspembayaran !== "LUNAS")
     .sort((a, b) => (a.tahun * 12 + a.bulan) - (b.tahun * 12 + b.bulan))
@@ -469,6 +503,14 @@ function PrintButtonLaporanMenyeluruh({
 
   const totalSisaBelumLunas = tagihanBelumLunas.reduce((s, t) => s + t.sisaTagihan, 0);
 
+  const sekolahData: SekolahInfo = {
+    namaSekolah: sekolah?.namaSekolah || "-",
+    alamatSekolah: sekolah?.alamatSekolah || "-",
+    logoUrl: sekolah?.logoUrl || null,
+    namaBendahara: sekolah?.namaBendahara || "-",
+    tandaTanganUrl: sekolah?.tandaTanganUrl || null,
+  };
+
   const laporanData: LaporanRiwayatData = {
     namaSiswa: siswaData?.namasiswa || siswaData?.namaSiswa || "-",
     kelas: siswaData?.kelas || "-",
@@ -479,13 +521,14 @@ function PrintButtonLaporanMenyeluruh({
     totalDibayarKeseluruhan,
     tagihanBelumLunas,
     totalSisaBelumLunas,
+    sekolah: sekolahData,
   };
 
   return (
     <>
       <Button onClick={handlePrint} variant="outline" className="gap-2">
         <PrinterIcon className="h-4 w-4" />
-        Cetak Laporan Tagihan Menyeluruh
+        Cetak Laporan Riwayat Pembayaran
       </Button>
       <div className="hidden">
         <div ref={contentRef}>
@@ -504,6 +547,7 @@ function PrintButtonSingle({
   indexTransaksi,
   totalTagihan,
   sisaTagihanBelumBayar,
+  sekolah,
 }: {
   pembayaran: PembayaranItem;
   tagihan: TagihanItem;
@@ -511,6 +555,7 @@ function PrintButtonSingle({
   indexTransaksi: number;
   totalTagihan: number;
   sisaTagihanBelumBayar: SisaTagihanItem[];
+  sekolah: SekolahInfo | null | undefined;
 }) {
   const contentRef = useRef<HTMLDivElement>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
@@ -540,6 +585,14 @@ function PrintButtonSingle({
   }, [pembayaran.idpembayaran]);
  
   void indexTransaksi;
+
+  const sekolahData: SekolahInfo = {
+    namaSekolah: sekolah?.namaSekolah || "-",
+    alamatSekolah: sekolah?.alamatSekolah || "-",
+    logoUrl: sekolah?.logoUrl || null,
+    namaBendahara: sekolah?.namaBendahara || "-",
+    tandaTanganUrl: sekolah?.tandaTanganUrl || null,
+  };
  
   const kwitansiData: KwitansiData = {
     noKwitansi,
@@ -569,6 +622,7 @@ function PrintButtonSingle({
       tahun: s.tahun,
       namatagihan: s.namatagihan || "-",
     })),
+    sekolah: sekolahData,
   };
  
   return (

@@ -48,9 +48,17 @@ function formatRupiah(n: number) {
 }
 
 export default function KwitansiTemplate({ data }: { data: KwitansiData }) {
-  const { sekolah } = data;
+  // FIX: guard defensif — sama seperti laporan-riwayat-template
+  const sekolah = data.sekolah ?? {
+    namaSekolah: "-",
+    alamatSekolah: "-",
+    logoUrl: null,
+    namaBendahara: "-",
+    tandaTanganUrl: null,
+  };
 
   return (
+    // sisanya tidak berubah
     <div className="bg-white text-black" style={{ width: "210mm", minHeight: "148mm", padding: "12mm" }}>
       {/* Header */}
       <div className="flex items-center justify-between border-b-2 border-black pb-3 mb-4">

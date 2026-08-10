@@ -2,6 +2,9 @@
 
 // components/laporan-riwayat-template.tsx
 // Sama seperti kwitansi: profil sekolah sekarang dinamis lewat `data.sekolah`.
+// FIX: tabel rincian "Tagihan Belum Lunas" dihapus — cukup diringkas di
+// 3 baris ringkasan di bawah tabel riwayat. Kolom "Sisa" pada tabel riwayat
+// dipecah jadi 2 kolom terpisah: "Sisa" (nominal) dan "Status" (badge).
 
 import type { SekolahInfo } from "./kwitansi-template"; // re-use tipe yang sama
 
@@ -33,9 +36,10 @@ export interface LaporanRiwayatData {
   jamCetak: string;
   items: LaporanRiwayatItem[];
   totalDibayarKeseluruhan: number;
+  // FIX: tetap dikirim (dipakai untuk hitung jumlah tunggakan & total sisa
+  // di 3 baris ringkasan), meski tabel rinciannya sudah tidak ditampilkan.
   tagihanBelumLunas: TagihanBelumLunasItem[];
   totalSisaBelumLunas: number;
-  // BARU
   sekolah: SekolahInfo;
 }
 
@@ -44,7 +48,16 @@ function formatRupiah(n: number) {
 }
 
 export default function LaporanRiwayatTemplate({ data }: { data: LaporanRiwayatData }) {
-  const { sekolah } = data;
+  // FIX: guard defensif — sekolah bisa undefined sesaat saat render pertama
+  // (mis. hidden print-div dirender sebelum query pengaturan_sekolah selesai)
+  const sekolah = data.sekolah ?? {
+    namaSekolah: "-",
+    alamatSekolah: "-",
+    logoUrl: null,
+    namaBendahara: "-",
+    tandaTanganUrl: null,
+  };
+  const statusLunas = data.totalSisaBelumLunas <= 0;
 
   return (
     <div className="bg-white text-black" style={{ width: "210mm", minHeight: "297mm", padding: "15mm" }}>
@@ -61,7 +74,7 @@ export default function LaporanRiwayatTemplate({ data }: { data: LaporanRiwayatD
           </div>
         </div>
         <div className="text-right">
-          <p className="font-bold text-xl uppercase tracking-wide">Laporan Tagihan Menyeluruh</p>
+          <p className="font-bold text-xl uppercase tracking-wide">Laporan Riwayat Pembayaran</p>
           <p className="text-xs text-gray-600">Dicetak: {data.tanggalCetak}, {data.jamCetak}</p>
         </div>
       </div>
@@ -82,9 +95,8 @@ export default function LaporanRiwayatTemplate({ data }: { data: LaporanRiwayatD
         </div>
       </div>
 
-      {/* Tabel 1: Mutasi riwayat pembayaran */}
-      <p className="font-bold text-sm mb-2">Riwayat Pembayaran</p>
-      <table className="w-full text-xs border-collapse mb-6">
+      {/* Tabel: Riwayat pembayaran, dengan kolom Sisa & Status terpisah */}
+      <table className="w-full text-xs border-collapse">
         <thead>
           <tr className="bg-gray-100">
             <th className="border border-gray-300 p-2 text-left w-8">No</th>
@@ -94,103 +106,74 @@ export default function LaporanRiwayatTemplate({ data }: { data: LaporanRiwayatD
             <th className="border border-gray-300 p-2 text-right">Total Tagihan</th>
             <th className="border border-gray-300 p-2 text-right">Dibayar</th>
             <th className="border border-gray-300 p-2 text-right">Sisa</th>
+            <th className="border border-gray-300 p-2 text-center">Status</th>
           </tr>
         </thead>
         <tbody>
-          {data.items.map((item, i) => (
-            <tr key={item.idpembayaran}>
-              <td className="border border-gray-300 p-1.5 text-center">{i + 1}</td>
-              <td className="border border-gray-300 p-1.5">
-                {new Date(item.tanggalpembayaran).toLocaleDateString("id-ID", {
-                  day: "2-digit", month: "2-digit", year: "numeric",
-                })}
-              </td>
-              <td className="border border-gray-300 p-1.5">
-                {item.namatagihan}
-                <span className="block text-[10px] text-gray-500">{item.periode}</span>
-              </td>
-              <td className="border border-gray-300 p-1.5 capitalize">{item.metodepembayaran}</td>
-              <td className="border border-gray-300 p-1.5 text-right">Rp{formatRupiah(item.totalTagihan)}</td>
-              <td className="border border-gray-300 p-1.5 text-right font-semibold">
-                Rp{formatRupiah(item.jumlahDibayar)}
-              </td>
-              <td className="border border-gray-300 p-1.5 text-right">
-                {item.sisaSetelahTransaksi <= 0 ? (
-                  <span className="text-green-700 font-semibold">Lunas</span>
-                ) : (
-                  `Rp${formatRupiah(item.sisaSetelahTransaksi)}`
-                )}
-              </td>
-            </tr>
-          ))}
+          {data.items.map((item, i) => {
+            const itemLunas = item.sisaSetelahTransaksi <= 0;
+            return (
+              <tr key={item.idpembayaran}>
+                <td className="border border-gray-300 p-1.5 text-center">{i + 1}</td>
+                <td className="border border-gray-300 p-1.5">
+                  {new Date(item.tanggalpembayaran).toLocaleDateString("id-ID", {
+                    day: "2-digit", month: "2-digit", year: "numeric",
+                  })}
+                </td>
+                <td className="border border-gray-300 p-1.5">
+                  {item.namatagihan}
+                  <span className="block text-[10px] text-gray-500">{item.periode}</span>
+                </td>
+                <td className="border border-gray-300 p-1.5 capitalize">{item.metodepembayaran}</td>
+                <td className="border border-gray-300 p-1.5 text-right">Rp{formatRupiah(item.totalTagihan)}</td>
+                <td className="border border-gray-300 p-1.5 text-right font-semibold">
+                  Rp{formatRupiah(item.jumlahDibayar)}
+                </td>
+                <td className="border border-gray-300 p-1.5 text-right">
+                  {itemLunas ? "Rp0" : `Rp${formatRupiah(item.sisaSetelahTransaksi)}`}
+                </td>
+                <td className="border border-gray-300 p-1.5 text-center">
+                  {itemLunas ? (
+                    <span className="text-green-700 font-semibold">Lunas</span>
+                  ) : (
+                    <span className="text-red-700 font-semibold">Belum Lunas</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
           {data.items.length === 0 && (
             <tr>
-              <td colSpan={7} className="border border-gray-300 p-4 text-center text-gray-500">
+              <td colSpan={8} className="border border-gray-300 p-4 text-center text-gray-500">
                 Belum ada riwayat transaksi pembayaran
               </td>
             </tr>
           )}
         </tbody>
-        <tfoot>
-          <tr className="bg-gray-100 font-bold">
-            <td colSpan={5} className="border border-gray-300 p-2 text-right">
-              Total Keseluruhan Dibayar
-            </td>
-            <td className="border border-gray-300 p-2 text-right" colSpan={2}>
-              Rp{formatRupiah(data.totalDibayarKeseluruhan)}
-            </td>
-          </tr>
-        </tfoot>
       </table>
 
-      {/* Tabel 2: Rincian tagihan yang belum lunas */}
-      <p className="font-bold text-sm mb-2">Rincian Tagihan yang Belum Lunas</p>
-      <table className="w-full text-xs border-collapse mb-4">
-        <thead>
-          <tr className="bg-gray-100">
-            <th className="border border-gray-300 p-2 text-left w-8">No</th>
-            <th className="border border-gray-300 p-2 text-left">Tagihan</th>
-            <th className="border border-gray-300 p-2 text-right">Total Tagihan</th>
-            <th className="border border-gray-300 p-2 text-right">Sudah Dibayar</th>
-            <th className="border border-gray-300 p-2 text-right">Sisa Belum Dibayar</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.tagihanBelumLunas.map((t, i) => (
-            <tr key={t.idtagihansiswa}>
-              <td className="border border-gray-300 p-1.5 text-center">{i + 1}</td>
-              <td className="border border-gray-300 p-1.5">
-                {t.namatagihan}
-                <span className="block text-[10px] text-gray-500">{t.periode}</span>
-              </td>
-              <td className="border border-gray-300 p-1.5 text-right">Rp{formatRupiah(t.totalTagihan)}</td>
-              <td className="border border-gray-300 p-1.5 text-right">Rp{formatRupiah(t.sudahDibayar)}</td>
-              <td className="border border-gray-300 p-1.5 text-right font-semibold text-red-700">
-                Rp{formatRupiah(t.sisaTagihan)}
-              </td>
-            </tr>
-          ))}
-          {data.tagihanBelumLunas.length === 0 && (
-            <tr>
-              <td colSpan={5} className="border border-gray-300 p-4 text-center text-green-700 font-semibold">
-                Semua tagihan sudah lunas
-              </td>
-            </tr>
-          )}
-        </tbody>
-        {data.tagihanBelumLunas.length > 0 && (
-          <tfoot>
-            <tr className="bg-gray-100 font-bold">
-              <td colSpan={4} className="border border-gray-300 p-2 text-right">
-                Total Sisa Tagihan Belum Dibayar
-              </td>
-              <td className="border border-gray-300 p-2 text-right text-red-700">
-                Rp{formatRupiah(data.totalSisaBelumLunas)}
-              </td>
-            </tr>
-          </tfoot>
-        )}
-      </table>
+      {/* FIX: Ringkasan dipisah dari tabel, dengan jarak, 3 baris */}
+{/* FIX: Ringkasan dipisah dari tabel, dengan jarak, 3 baris */}
+      <div className="mt-8 max-w-xs ml-auto text-sm space-y-1.5">
+        <div className="flex justify-between">
+          <span className="text-gray-700">Total Keseluruhan Dibayar</span>
+          <span className="font-bold text-green-700">
+            Rp{formatRupiah(data.totalDibayarKeseluruhan)}
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-gray-700">Total Tunggakan yang Dimiliki</span>
+          <span className="font-semibold">
+            Rp{formatRupiah(data.totalSisaBelumLunas)}
+          </span>
+        </div>
+        <div className="flex justify-between border-t border-gray-300 pt-1.5">
+          <span className="text-gray-700 font-semibold">Sisa</span>
+          <span className={`font-bold ${statusLunas ? "text-green-700" : "text-red-700"}`}>
+            Rp{formatRupiah(data.totalSisaBelumLunas)} ({statusLunas ? "Lunas" : "Belum Lunas"})
+          </span>
+        </div>
+      </div>
 
       {/* Tanda tangan */}
       <div className="flex justify-end mt-10">

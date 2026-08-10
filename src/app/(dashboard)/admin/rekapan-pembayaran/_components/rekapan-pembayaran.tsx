@@ -35,7 +35,10 @@ import {
 import * as XLSX from "xlsx";
 import { useReactToPrint } from "react-to-print";
 // FIX: sesuaikan path berikut dengan lokasi asli komponen & util di project kamu
-import KwitansiTemplate, { KwitansiData } from "@/components/common/kwitansi-template";
+import KwitansiTemplate, {
+  KwitansiData,
+  SekolahInfo,
+} from "@/components/common/kwitansi-template";
 
 const BULAN_NAMA = [
   "",
@@ -147,7 +150,13 @@ const MonthYearPicker = ({
 };
 
 // ─── Tombol Cetak Kwitansi per transaksi ───────────────────────────────────────
-function PrintButtonRekap({ item }: { item: any }) {
+function PrintButtonRekap({
+  item,
+  sekolah,
+}: {
+  item: any;
+  sekolah: SekolahInfo | null | undefined;
+}) {
   const contentRef = useRef<HTMLDivElement>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
 
@@ -176,6 +185,16 @@ function PrintButtonRekap({ item }: { item: any }) {
     // generateQrCodeDataUrl(linkKwitansi).then(setQrCodeDataUrl);
   }, [item.idpembayaran]);
 
+  // FIX: fallback aman kalau data pengaturan sekolah belum termuat/kosong,
+  // biar komponen kwitansi tidak crash saat namaSekolah dsb. undefined
+  const sekolahData: SekolahInfo = {
+    namaSekolah: sekolah?.namaSekolah || "-",
+    alamatSekolah: sekolah?.alamatSekolah || "-",
+    logoUrl: sekolah?.logoUrl || null,
+    namaBendahara: sekolah?.namaBendahara || "-",
+    tandaTanganUrl: sekolah?.tandaTanganUrl || null,
+  };
+
   const kwitansiData: KwitansiData = {
     noKwitansi,
     tanggalCetak: tglBayar.toLocaleDateString("id-ID", {
@@ -197,6 +216,7 @@ function PrintButtonRekap({ item }: { item: any }) {
     sisaTagihan: sisaSetelahIni,
     isLunas,
     qrCodeDataUrl,
+    sekolah: sekolahData,
     // Catatan: daftar "tagihan lain yang belum lunas" tidak disertakan di sini
     // karena butuh query tambahan per siswa. Bisa ditambahkan kalau perlu.
   };
@@ -239,6 +259,35 @@ export default function RekapanPembayaran() {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  // FIX: ambil data profil sekolah (nama, alamat, logo, bendahara, ttd)
+  // dari tabel pengaturan_sekolah, dipakai untuk header/footer kwitansi.
+  // Sesuaikan nama tabel & kolom dengan skema Supabase kamu yang sebenarnya.
+const { data: sekolahInfo } = useQuery({
+  queryKey: ["pengaturan-sekolah"],
+  queryFn: async (): Promise<SekolahInfo | null> => {
+    const { data, error } = await supabase
+      .from("pengaturan_sekolah")
+      .select("nama_sekolah, alamat_sekolah, logo_url, nama_bendahara, tanda_tangan_bendahara_url")
+      .eq("id", 1)
+      .maybeSingle();
+
+    if (error) {
+      toast.error("Gagal memuat data sekolah", { description: error.message });
+      return null;
+    }
+    if (!data) return null;
+
+    return {
+      namaSekolah: data.nama_sekolah,
+      alamatSekolah: data.alamat_sekolah,
+      logoUrl: data.logo_url,
+      namaBendahara: data.nama_bendahara,
+      tandaTanganUrl: data.tanda_tangan_bendahara_url,
+    };
+  },
+  staleTime: 5 * 60 * 1000,
+});
 
   const { data: pembayaranData, isLoading } = useQuery({
     queryKey: ["rekapan-pembayaran", selectedMonth, selectedYear],
@@ -534,7 +583,7 @@ export default function RekapanPembayaran() {
                         {/* Aksi: cetak kwitansi + lihat bukti pembayaran */}
                         <td className="p-3 text-center">
                           <div className="flex items-center justify-center gap-1.5">
-                            <PrintButtonRekap item={item} />
+                            <PrintButtonRekap item={item} sekolah={sekolahInfo} />
                             {item.bukti_pembayaran_url ? (
                               <Button
                                 variant="outline"
@@ -572,6 +621,7 @@ export default function RekapanPembayaran() {
             <DialogTitle>Bukti Pembayaran</DialogTitle>
           </DialogHeader>
           {buktiPreviewUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
             <img
               src={buktiPreviewUrl}
               alt="Bukti pembayaran"
