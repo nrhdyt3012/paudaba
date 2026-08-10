@@ -33,10 +33,6 @@ const BULAN_NAMA = [
   "Juli", "Agustus", "September", "Oktober", "November", "Desember",
 ];
 
-// FIX: opsi filter kelas & status sekarang dipakai sebagai daftar checkbox
-// di dropdown multi-select custom (lihat komponen MultiSelectDropdown di
-// bawah), bukan lagi <Select> single-value. Tidak ada lagi opsi "semua"
-// karena array kosong = tanpa filter = tampilkan semua.
 const KELAS_OPTIONS = [
   { value: "KB", label: "KB" },
   { value: "TK A", label: "TK A" },
@@ -49,8 +45,8 @@ const STATUS_OPTIONS = [
   { value: "BELUM BAYAR", label: "Belum Bayar" },
 ];
 
-// Jeda pengiriman reminder massal dari halaman ini — pola sama seperti di
-// halaman Reminder Tunggakan (anti-banned Fonnte: 30-60 detik antar siswa).
+// Jeda pengiriman reminder massal — pola sama seperti halaman Reminder
+// Tunggakan (anti-banned Fonnte: 30-60 detik antar siswa).
 const MIN_DELAY_MS = 30_000;
 const MAX_DELAY_MS = 60_000;
 const randomDelay = () =>
@@ -77,16 +73,15 @@ function getTagihanPermissions(item: any) {
 
   return {
     canBayarManual: !hasMidtrans && item.statuspembayaran !== "LUNAS",
-    // canDelete = belum pernah ada pembayaran SUCCESS sama sekali (murni
-    // BELUM BAYAR). Ini juga jadi dasar tombol "Hapus Tagihan Terpilih".
+    // Boleh dihapus kalau belum pernah ada pembayaran SUCCESS sama sekali.
     canDelete: !hasAnySuccess,
     hasMidtrans,
     metodeLabel,
   };
 }
 
-// ─── Dropdown filter multi-select (checkbox) sederhana, tanpa dependency
-// tambahan selain Button & Checkbox yang sudah ada di project ────────────
+// ─── Dropdown filter multi-select (checkbox), hanya dipakai di toolbar
+// default (bukan saat mode pilih-banyak) ──────────────────────────────
 function MultiSelectDropdown({
   label,
   options,
@@ -167,12 +162,10 @@ export default function DaftarTagihanSiswa() {
     handleChangePage, handleChangeLimit, handleChangeSearch,
   } = useDataTable();
 
-  // FIX: filterKelas & filterStatus sekarang array (multi-select).
-  // Array kosong = tidak ada filter = tampilkan semua.
   const [filterKelas, setFilterKelas] = useState<string[]>([]);
   const [filterStatus, setFilterStatus] = useState<string[]>([]);
 
-  const { data: stats, refetch: refetchStats } = useQuery({
+  const { data: stats } = useQuery({
     queryKey: ["tagihan-admin-stats"],
     queryFn: async () => {
       const { count: total } = await supabase
@@ -198,8 +191,6 @@ export default function DaftarTagihanSiswa() {
           { count: "exact" }
         );
 
-      // FIX: filter status & kelas sekarang pakai .in() dengan array,
-      // hanya diterapkan kalau ada minimal 1 opsi yang dipilih.
       if (filterStatus.length > 0) query = query.in("statuspembayaran", filterStatus);
       if (filterKelas.length > 0) query = query.in("siswa.kelas", filterKelas);
 
@@ -216,9 +207,6 @@ export default function DaftarTagihanSiswa() {
       if (error) toast.error("Gagal memuat tagihan", { description: error.message });
 
       let result = data || [];
-      // Filter ulang di client karena .in() pada relasi embed tidak selalu
-      // mengecualikan baris induk yang tidak match (sama seperti perilaku
-      // .eq() sebelumnya untuk kelas).
       if (filterKelas.length > 0) {
         result = result.filter((item: any) => filterKelas.includes(item.siswa?.kelas));
       }
@@ -230,7 +218,7 @@ export default function DaftarTagihanSiswa() {
   const [selectedAction, setSelectedAction] = useState<{ data: any; type: "bayar" | "delete" } | null>(null);
   const handleChangeAction = (open: boolean) => { if (!open) setSelectedAction(null); };
 
-  // FIX: state untuk seleksi baris (checkbox) + aksi massal (reminder & hapus)
+  // ─── Seleksi baris untuk aksi massal ──────────────────────────────────
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
   const [isSendingReminder, setIsSendingReminder] = useState(false);
   const [reminderProgress, setReminderProgress] = useState({ done: 0, total: 0 });
@@ -251,13 +239,28 @@ export default function DaftarTagihanSiswa() {
     return () => { channel.unsubscribe(); };
   }, []);
 
-  // FIX: reset seleksi setiap kali halaman/limit/pencarian/filter berubah,
-  // supaya tidak ada baris "terpilih hantu" yang sudah tidak tampil lagi.
-  useEffect(() => {
-    setSelectedRows(new Set());
-  }, [currentPage, currentLimit, currentSearch, filterKelas, filterStatus]);
-
   const rawItems: any[] = tagihanList?.data || [];
+
+  // FIX: bukan reset total setiap ganti halaman/pencarian/filter, tapi
+  // sinkronisasi — id yang masih ada di hasil terbaru tetap dipertahankan,
+  // yang sudah tidak muncul lagi di tabel baru dibuang dari seleksi.
+  // Karena filter tidak bisa diubah selama mode pilih-banyak aktif (lihat
+  // toolbar di bawah), efek ini praktis hanya berperan saat pindah halaman
+  // atau ganti kata pencarian.
+  useEffect(() => {
+    setSelectedRows((prev) => {
+      if (prev.size === 0) return prev;
+      const currentIds = new Set(rawItems.map((item) => item.idtagihansiswa));
+      let changed = false;
+      const next = new Set<number>();
+      prev.forEach((id) => {
+        if (currentIds.has(id)) next.add(id);
+        else changed = true;
+      });
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawItems]);
 
   const toggleRow = (id: number) => {
     setSelectedRows((prev) => {
@@ -280,17 +283,34 @@ export default function DaftarTagihanSiswa() {
     [rawItems, selectedRows]
   );
 
-  // FIX: hapus massal hanya boleh kalau SEMUA tagihan terpilih memang
-  // belum pernah punya riwayat pembayaran SUCCESS sama sekali (canDelete).
-  // Kalau salah satu saja sudah pernah dibayar (termasuk BELUM LUNAS /
-  // cicilan), tombol hapus terpilih akan disable & pudar.
-  const canBulkDelete =
-    selectedItems.length > 0 && selectedItems.every((item) => getTagihanPermissions(item).canDelete);
+  // Hapus massal hanya boleh kalau SEMUA tagihan terpilih belum pernah
+  // punya riwayat pembayaran SUCCESS sama sekali.
+  const itemsNotDeletable = useMemo(
+    () => selectedItems.filter((item) => !getTagihanPermissions(item).canDelete),
+    [selectedItems]
+  );
+  const canBulkDelete = selectedItems.length > 0 && itemsNotDeletable.length === 0;
+
+  // Reminder tunggakan hanya boleh kalau TIDAK ADA satupun tagihan
+  // terpilih yang statusnya LUNAS. BELUM BAYAR & BELUM LUNAS boleh.
+  const lunasItemsSelected = useMemo(
+    () => selectedItems.filter((item) => item.statuspembayaran === "LUNAS"),
+    [selectedItems]
+  );
+  const canBulkReminder = selectedItems.length > 0 && lunasItemsSelected.length === 0;
 
   const handleKirimReminderTerpilih = async () => {
-    // Kelompokkan tagihan terpilih per siswa, biar siswa yang punya
-    // beberapa tagihan tertunggak yang dipilih sekaligus cuma dikirimi
-    // 1 pesan (bukan 1 pesan per tagihan).
+    if (!canBulkReminder) {
+      const namaSiswa = Array.from(
+        new Set(lunasItemsSelected.map((item) => item.siswa?.namasiswa || "siswa"))
+      ).join(", ");
+      toast.error(
+        `Tidak bisa mengirim reminder: terdapat tagihan yang sudah LUNAS pada ${namaSiswa}. ` +
+          `Batalkan centang tagihan yang sudah lunas terlebih dahulu.`
+      );
+      return;
+    }
+
     const map = new Map<string, { idsiswa: string; namasiswa: string; nowa: string; tagihanIds: number[] }>();
     let skippedNoWa = 0;
 
@@ -354,13 +374,18 @@ export default function DaftarTagihanSiswa() {
   };
 
   const handleHapusTerpilih = async () => {
-    if (!canBulkDelete) return;
-    const ids = selectedItems.map((item) => item.idtagihansiswa);
+    if (!canBulkDelete) {
+      const namaSiswa = Array.from(
+        new Set(itemsNotDeletable.map((item) => item.siswa?.namasiswa || "siswa"))
+      ).join(", ");
+      toast.error(
+        `Tidak bisa menghapus: terdapat tagihan yang sudah memiliki riwayat pembayaran pada ${namaSiswa}. ` +
+          `Batalkan centang tagihan tersebut terlebih dahulu.`
+      );
+      return;
+    }
 
-    // NOTE: pakai window.confirm sebagai konfirmasi cepat karena saya tidak
-    // punya akses ke komponen dialog konfirmasi kustom kamu. Kalau ada
-    // komponen AlertDialog di project, ini bisa diganti supaya tampilannya
-    // konsisten dengan dialog-dialog lain.
+    const ids = selectedItems.map((item) => item.idtagihansiswa);
     const confirmed = window.confirm(
       `Hapus ${ids.length} tagihan terpilih? Tindakan ini tidak bisa dibatalkan.`
     );
@@ -383,7 +408,6 @@ export default function DaftarTagihanSiswa() {
     return rawItems.map((item: any, index: number) => {
       const perms = getTagihanPermissions(item);
       return [
-        // FIX: kolom checkbox seleksi baris — ditaruh paling kiri sebelum "No"
         <Checkbox
           key={`sel-${item.idtagihansiswa}`}
           checked={selectedRows.has(item.idtagihansiswa)}
@@ -483,13 +507,21 @@ export default function DaftarTagihanSiswa() {
 
   return (
     <div className="w-full space-y-6">
+      {/* Dua tampilan toolbar yang sepenuhnya terpisah — tidak dicampur.
+          Default: judul + search + filter Kelas/Status + Buat Tagihan.
+          Mode pilih-banyak: HANYA jumlah terpilih + Batal + Kirim
+          Reminder + Hapus. Filter sengaja tidak ditampilkan di sini;
+          alurnya: filter dulu di tampilan default, baru pilih siswa. */}
       {selectedRows.size > 0 ? (
-        // FIX: baris toolbar utama (judul + filter + tombol "Buat Tagihan")
-        // digantikan sementara oleh action bar ini selama ada baris terpilih.
-        <div className="flex flex-col lg:flex-row items-start lg:items-center mb-4 gap-3 justify-between w-full rounded-lg border bg-muted/40 p-3">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center mb-4 gap-3 justify-between w-full rounded-lg border bg-muted/40 p-3">
           <div className="flex items-center gap-3">
             <span className="font-semibold text-sm">{selectedRows.size} tagihan dipilih</span>
-            <Button variant="ghost" size="sm" onClick={clearSelection} disabled={isSendingReminder || isBulkDeleting}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearSelection}
+              disabled={isSendingReminder || isBulkDeleting}
+            >
               Batal
             </Button>
           </div>
@@ -499,7 +531,15 @@ export default function DaftarTagihanSiswa() {
               variant="outline"
               onClick={handleKirimReminderTerpilih}
               disabled={isSendingReminder || isBulkDeleting}
-              className="text-blue-600 border-blue-200 hover:bg-blue-50"
+              title={
+                !canBulkReminder
+                  ? "Ada tagihan berstatus LUNAS pada seleksi — klik untuk lihat detail"
+                  : undefined
+              }
+              className={cn(
+                "border-blue-200",
+                canBulkReminder ? "text-blue-600 hover:bg-blue-50" : "text-gray-400 opacity-50"
+              )}
             >
               {isSendingReminder ? (
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -514,15 +554,15 @@ export default function DaftarTagihanSiswa() {
               type="button"
               variant="outline"
               onClick={handleHapusTerpilih}
-              disabled={!canBulkDelete || isBulkDeleting || isSendingReminder}
+              disabled={isBulkDeleting || isSendingReminder}
               title={
                 !canBulkDelete
-                  ? "Hanya tagihan berstatus Belum Bayar (tanpa riwayat pembayaran) yang bisa dihapus sekaligus"
+                  ? "Ada tagihan dengan riwayat pembayaran pada seleksi — klik untuk lihat detail"
                   : undefined
               }
               className={cn(
                 "border-red-200",
-                canBulkDelete ? "text-red-600 hover:bg-red-50" : "text-gray-400 opacity-50 cursor-not-allowed"
+                canBulkDelete ? "text-red-600 hover:bg-red-50" : "text-gray-400 opacity-50"
               )}
             >
               {isBulkDeleting ? (
@@ -558,7 +598,6 @@ export default function DaftarTagihanSiswa() {
               selected={filterStatus}
               onChange={setFilterStatus}
             />
-
             <Button
               className="bg-green-600 hover:bg-green-700"
               onClick={() => router.push("/admin/tagihan/buat")}
