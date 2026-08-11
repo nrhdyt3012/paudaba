@@ -78,6 +78,17 @@ const SUPERADMIN_MENU = [
   { title: "Changelog", url: "/admin/changelog", icon: Activity },
 ];
 
+// Kepala Sekolah: reuse halaman & data yang sama dengan admin/bendahara,
+// hanya 4 menu monitoring & pelaporan (tanpa CRUD). Aksi seperti "Tagih
+// via WhatsApp" dan "Edit Profil Sekolah" disembunyikan di masing-masing
+// komponennya berdasarkan role, bukan lewat menu terpisah.
+const KEPALA_SEKOLAH_MENU = [
+  { title: "Dashboard", url: "/admin", icon: LayoutDashboard },
+  { title: "Rekapan Pembayaran", url: "/admin/rekapan-pembayaran", icon: Receipt },
+  { title: "Rekapan Tunggakan", url: "/admin/rekapan-tunggakan", icon: AlertCircle },
+  { title: "Changelog", url: "/admin/changelog", icon: Activity },
+];
+
 const SUPERADMIN_EXCLUSIVE_MENU = [
   { title: "Kelola Akun", url: "/superadmin/bendahara", icon: ShieldCheck },
 ];
@@ -115,6 +126,7 @@ export default function AppSidebar() {
 
   const isSuperadmin = profile?.role === "superadmin";
   const isAdmin = profile?.role === "admin";
+  const isKepalaSekolah = profile?.role === "kepala_sekolah";
   const isSiswa = profile?.role === "siswa";
 
   // FIX (fitur lupa password): badge jumlah permintaan reset password yang
@@ -138,12 +150,16 @@ export default function AppSidebar() {
     ? SISWA_MENU
     : isSuperadmin
     ? SUPERADMIN_MENU
+    : isKepalaSekolah
+    ? KEPALA_SEKOLAH_MENU
     : ADMIN_MENU;
 
   const roleColor = isSuperadmin
     ? "text-yellow-600 dark:text-yellow-400"
     : isAdmin
     ? "text-green-600 dark:text-green-400"
+    : isKepalaSekolah
+    ? "text-purple-600 dark:text-purple-400"
     : "text-blue-600 dark:text-blue-400";
 
   return (
@@ -158,7 +174,7 @@ export default function AppSidebar() {
                   href={
                     isSuperadmin
                       ? "/superadmin"
-                      : isAdmin
+                      : isAdmin || isKepalaSekolah
                       ? "/admin"
                       : "/siswa/info"
                   }
@@ -256,6 +272,8 @@ export default function AppSidebar() {
                   ? "bg-yellow-500"
                   : isAdmin
                   ? "bg-green-600"
+                  : isKepalaSekolah
+                  ? "bg-purple-600"
                   : "bg-blue-500"
               )}
             >
@@ -275,6 +293,8 @@ export default function AppSidebar() {
                   ? "Superadmin"
                   : isAdmin
                   ? "Bendahara"
+                  : isKepalaSekolah
+                  ? "Kepala Sekolah"
                   : "Wali Siswa"}
               </p>
             </div>

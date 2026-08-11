@@ -17,7 +17,7 @@ export default async function Home() {
   }
 
   // Redirect berdasarkan role
-  if (profile.role === "admin") {
+  if (profile.role === "admin" || profile.role === "kepala_sekolah") {
     redirect("/admin");
   } else if (profile.role === "siswa") {
     redirect("/siswa/info");

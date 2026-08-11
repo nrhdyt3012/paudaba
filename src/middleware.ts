@@ -149,7 +149,7 @@ export async function middleware(request: NextRequest) {
       url.pathname =
         userRole === "superadmin"
           ? "/superadmin"
-          : userRole === "admin"
+          : userRole === "admin" || userRole === "kepala_sekolah"
           ? "/admin"
           : "/siswa/info";
       return NextResponse.redirect(url);
@@ -186,10 +186,33 @@ export async function middleware(request: NextRequest) {
   }
 
   if (pathname.startsWith("/admin")) {
-    if (userRole !== "admin" && userRole !== "superadmin") {
+    if (
+      userRole !== "admin" &&
+      userRole !== "superadmin" &&
+      userRole !== "kepala_sekolah"
+    ) {
       const url = request.nextUrl.clone();
       url.pathname = userRole === "siswa" ? "/siswa/info" : "/login";
       return NextResponse.redirect(url);
+    }
+
+    // Kepala Sekolah: reuse halaman admin yang sama, tapi read-only —
+    // cuma boleh akses 4 halaman monitoring/pelaporan. Menu CRUD (Master
+    // Tagihan, Tagihan Siswa, Data Siswa, Kelola Akun) dan halaman reminder
+    // WhatsApp tetap tertutup meski diakses langsung lewat URL.
+    if (userRole === "kepala_sekolah") {
+      const ALLOWED_KEPALA_SEKOLAH_PATHS = new Set([
+        "/admin",
+        "/admin/rekapan-pembayaran",
+        "/admin/rekapan-tunggakan",
+        "/admin/changelog",
+      ]);
+
+      if (!ALLOWED_KEPALA_SEKOLAH_PATHS.has(pathname)) {
+        const url = request.nextUrl.clone();
+        url.pathname = "/admin";
+        return NextResponse.redirect(url);
+      }
     }
   }
 

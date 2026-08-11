@@ -12,6 +12,7 @@ import { createClient } from "@/lib/supabase/client";
 import { convertIDR } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { useAngkatanFilterStore } from "@/stores/angkatan-filter-store";
+import { useAuthStore } from "@/stores/auth-store";
 import { useQuery } from "@tanstack/react-query";
 import {
   FileText,
@@ -41,6 +42,10 @@ export default function DashboardShared() {
   const currentMonth = new Date().getMonth() + 1;
   const currentYear = new Date().getFullYear();
   const { angkatan } = useAngkatanFilterStore();
+  const profile = useAuthStore((state) => state.profile);
+  // Kepala Sekolah: read-only — tidak boleh mengubah profil sekolah,
+  // cuma memantau/melihat.
+  const isKepalaSekolah = profile?.role === "kepala_sekolah";
 
   const [showTunggakanDialog, setShowTunggakanDialog] = useState(false);
   const [searchTunggakan, setSearchTunggakan] = useState("");
@@ -239,14 +244,16 @@ export default function DashboardShared() {
       KB/TK Aisyiyah Bustanul Athfal 1 Buduran
     </p>
   </div>
-  <Button
-    variant="outline"
-    size="sm"
-    onClick={() => setShowEditProfilDialog(true)}
-  >
-    <Settings className="h-4 w-4 mr-1.5" />
-    Edit Profil Sekolah
-  </Button>
+  {!isKepalaSekolah && (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => setShowEditProfilDialog(true)}
+    >
+      <Settings className="h-4 w-4 mr-1.5" />
+      Edit Profil Sekolah
+    </Button>
+  )}
 </div>
 
       {/* ─── Sensus Siswa — SEMUA kartu sekarang bisa diklik ─────────────────── */}

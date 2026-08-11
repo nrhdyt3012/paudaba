@@ -41,9 +41,14 @@ export async function ajukanResetPassword(
   // baca tabel admin/siswa & tulis ke password_reset_requests tanpa RLS.
   const supabase = await createClient({ isAdmin: true });
 
-  const [{ data: adminRow }, { data: siswaRow }] = await Promise.all([
+  const [{ data: adminRow }, { data: kepalaSekolahRow }, { data: siswaRow }] = await Promise.all([
     supabase
       .from("admin")
+      .select("id, nama, nohp, is_active")
+      .eq("email", email)
+      .maybeSingle(),
+    supabase
+      .from("kepala_sekolah")
       .select("id, nama, nohp, is_active")
       .eq("email", email)
       .maybeSingle(),
@@ -56,7 +61,7 @@ export async function ajukanResetPassword(
 
   // Email tidak ditemukan di akun manapun — tetap balas pesan generik,
   // jangan insert apa pun.
-  if (!adminRow && !siswaRow) {
+  if (!adminRow && !kepalaSekolahRow && !siswaRow) {
     return { status: "success", message: GENERIC_MESSAGE };
   }
 
@@ -67,10 +72,17 @@ export async function ajukanResetPassword(
         name: (adminRow.nama as string) || null,
         phone: (adminRow.nohp as string) || null,
       }
+    : kepalaSekolahRow
+    ? {
+        id: kepalaSekolahRow.id as string,
+        role: "kepala_sekolah" as const,
+        name: (kepalaSekolahRow.nama as string) || null,
+        phone: (kepalaSekolahRow.nohp as string) || null,
+      }
     : {
         id: siswaRow!.id as string,
         role: "siswa" as const,
-        namasiswa: (siswaRow!.namasiswa as string) || null,
+        name: (siswaRow!.namasiswa as string) || null,
         phone: (siswaRow!.nowa as string) || null,
       };
 

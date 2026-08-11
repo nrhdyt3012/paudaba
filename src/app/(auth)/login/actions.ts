@@ -63,6 +63,13 @@ if (error) {
       .eq("id", user.id)
       .maybeSingle();
 
+    // ── Cek tabel kepala_sekolah ─────────────────────────────────────────────
+    const { data: kepalaSekolahData } = await authSupabase
+      .from("kepala_sekolah")
+      .select("id, nama, is_active")
+      .eq("id", user.id)
+      .maybeSingle();
+
     // ── Cek tabel admin / bendahara ─────────────────────────────────────────
     const { data: adminData } = await authSupabase
       .from("admin")
@@ -84,6 +91,13 @@ if (superadminData) {
     id: superadminData.id,
     name: superadminData.nama,
     role: "superadmin" as const,
+    avatar_url: null,
+  };
+} else if (kepalaSekolahData) {
+  profile = {
+    id: kepalaSekolahData.id,
+    name: kepalaSekolahData.nama,
+    role: "kepala_sekolah" as const,
     avatar_url: null,
   };
 } else if (adminData) {
@@ -128,6 +142,7 @@ if (superadminData) {
 //   (bukan tabel wali terpisah, jadi statusnya diturunkan dari anak-anaknya).
 const isDeactivated =
   (adminData && adminData.is_active === false) ||
+  (kepalaSekolahData && kepalaSekolahData.is_active === false) ||
   (profile?.role === "siswa" && (!profile.children || profile.children.length === 0));
 
 if (isDeactivated) {
@@ -154,7 +169,7 @@ revalidatePath("/", "layout");
 const redirectUrl =
   profile.role === "superadmin"
     ? "/superadmin"
-    : profile.role === "admin"
+    : profile.role === "admin" || profile.role === "kepala_sekolah"
     ? "/admin"
     : profile.role === "siswa" && !profile.activeSiswaId
     ? "/siswa/pilih-anak" // anak >1 dan belum dipilih

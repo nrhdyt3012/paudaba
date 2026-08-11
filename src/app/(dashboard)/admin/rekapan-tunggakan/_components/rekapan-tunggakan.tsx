@@ -27,6 +27,7 @@ import {
   Cell,
 } from "recharts";
 import * as XLSX from "xlsx";
+import { useAuthStore } from "@/stores/auth-store";
 
 const BULAN_NAMA = [
   "",
@@ -151,6 +152,10 @@ const MonthYearPicker = ({
 export default function RekapanTunggakan() {
   const supabase = createClient();
   const router = useRouter();
+  const profile = useAuthStore((state) => state.profile);
+  // Kepala Sekolah: read-only — cuma memantau tunggakan, tidak mengirim
+  // reminder/penagihan (itu tetap tugas admin/bendahara).
+  const isKepalaSekolah = profile?.role === "kepala_sekolah";
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [showPicker, setShowPicker] = useState(false);
@@ -398,15 +403,17 @@ export default function RekapanTunggakan() {
             </Button>
             {/* FIX poin 4: sekarang navigasi ke HALAMAN PENUH (bukan popup),
                 yang sudah menggabungkan tagihan per siswa. */}
-            <Button
-              onClick={() => router.push("/admin/rekapan-tunggakan/reminder")}
-              disabled={!tunggakanData?.length}
-              size="sm"
-              className="bg-green-600 hover:bg-green-700"
-            >
-              <MessageSquare className="mr-2 h-4 w-4" />
-              Tagih via WhatsApp
-            </Button>
+            {!isKepalaSekolah && (
+              <Button
+                onClick={() => router.push("/admin/rekapan-tunggakan/reminder")}
+                disabled={!tunggakanData?.length}
+                size="sm"
+                className="bg-green-600 hover:bg-green-700"
+              >
+                <MessageSquare className="mr-2 h-4 w-4" />
+                Tagih via WhatsApp
+              </Button>
+            )}
           </div>
         </CardHeader>
         <CardContent>

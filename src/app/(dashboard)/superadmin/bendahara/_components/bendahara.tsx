@@ -37,6 +37,7 @@ const ROLE_OPTIONS = [
   { value: "semua", label: "Semua Role" },
   { value: "wali", label: "Wali Siswa" },
   { value: "bendahara", label: "Bendahara" },
+  { value: "kepala_sekolah", label: "Kepala Sekolah" },
 ];
 
 // ─── FIX (multi-anak per wali): tipe baru untuk data anak dalam satu akun wali ──
@@ -52,7 +53,7 @@ type AkunRow = {
   // wali bisa punya banyak baris siswa. Semua aksi (nonaktifkan/hapus/
   // ganti password) harus beroperasi lewat id ini.
   id: string;
-  source: "wali" | "bendahara";
+  source: "wali" | "bendahara" | "kepala_sekolah";
   namaAkun: string; // nama wali (untuk bendahara: nama bendahara)
   anak?: AnakRow[]; // FIX: daftar anak, hanya terisi untuk source "wali"
   email: string;
@@ -87,12 +88,13 @@ export default function BendaharaManagement() {
   const { data: akunList, isLoading } = useQuery({
     queryKey: ["kelola-akun-list"],
     queryFn: async () => {
-      const [{ data: siswaData }, { data: adminData }, { data: paidPembayaran }] = await Promise.all([
+      const [{ data: siswaData }, { data: adminData }, { data: kepalaSekolahData }, { data: paidPembayaran }] = await Promise.all([
         supabase
           .from("siswa")
           .select("id, namasiswa, nis, namawali, email, nowa, is_active, wali_auth_id")
           .order("namasiswa"),
         supabase.from("admin").select("id, nama, email, nohp, is_active").order("nama"),
+        supabase.from("kepala_sekolah").select("id, nama, email, nohp, is_active").order("nama"),
         supabase
           .from("pembayaran")
           .select("idsiswa")
@@ -149,7 +151,19 @@ export default function BendaharaManagement() {
         hasPaidTagihan: false,
       }));
 
-      return [...waliRows, ...bendaharaRows];
+      const kepalaSekolahRows: AkunRow[] = (kepalaSekolahData || []).map((k: any) => ({
+        id: k.id,
+        source: "kepala_sekolah",
+        namaAkun: k.nama || "-",
+        email: k.email || "-",
+        noTelp: k.nohp || "-",
+        role: "Kepala Sekolah",
+        isActive: k.is_active !== false,
+        // Kepala Sekolah cuma memantau, tidak terkait tagihan siswa
+        hasPaidTagihan: false,
+      }));
+
+      return [...waliRows, ...bendaharaRows, ...kepalaSekolahRows];
     },
   });
 
@@ -355,6 +369,8 @@ export default function BendaharaManagement() {
       className={`px-2 py-0.5 rounded-full text-xs font-medium ${
         item.source === "bendahara"
           ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-100"
+          : item.source === "kepala_sekolah"
+          ? "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100"
           : "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100"
       }`}
     >
@@ -450,7 +466,7 @@ export default function BendaharaManagement() {
           </Select>
           <Button onClick={() => setShowCreate(true)} className="bg-green-600 hover:bg-green-700">
             <Plus className="w-4 h-4 mr-2" />
-            Tambah Bendahara
+            Tambah Akun
           </Button>
         </div>
       </div>
@@ -524,6 +540,7 @@ export default function BendaharaManagement() {
         open={showCreate}
         onOpenChange={setShowCreate}
         refetch={invalidate}
+        kepalaSekolahExists={allAkun.some((a) => a.source === "kepala_sekolah")}
       />
 
       <DialogGantiPasswordWali
@@ -622,12 +639,28 @@ export default function BendaharaManagement() {
   );
 }
 
-// ─── Dialog: Tambah Bendahara (tidak berubah) ────────────────────────────────
+// ─── Dialog: Tambah Akun (Bendahara / Kepala Sekolah) ────────────────────────
 function DialogCreateBendahara({
-  open, onOpenChange, refetch,
-}: { open: boolean; onOpenChange: (o: boolean) => void; refetch: () => void }) {
-  const form = useForm({ defaultValues: { nama: "", email: "", password: "", no_hp: "" } });
+  open, onOpenChange, refetch, kepalaSekolahExists,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  refetch: () => void;
+  kepalaSekolahExists: boolean;
+}) {
+  const form = useForm({
+    defaultValues: { role: "bendahara", nama: "", email: "", password: "", no_hp: "" },
+  });
   const [isPending, setIsPending] = useState(false);
+  const selectedRole = form.watch("role");
+
+  // Kalau dialog dibuka lagi setelah sempat pilih "kepala_sekolah" tapi
+  // ternyata sudah ada (mis. dibuat dari tab lain), balikkan ke bendahara.
+  useEffect(() => {
+    if (open && kepalaSekolahExists && form.getValues("role") === "kepala_sekolah") {
+      form.setValue("role", "bendahara");
+    }
+  }, [open, kepalaSekolahExists]);
 
   const onSubmit = form.handleSubmit(async (data) => {
     setIsPending(true);
@@ -639,8 +672,10 @@ function DialogCreateBendahara({
     if (state.status === "error") {
       toast.error("Gagal menambah akun", { description: state.errors?._form?.[0] });
     } else {
-      toast.success("Akun Bendahara berhasil dibuat");
-      form.reset();
+      toast.success(
+        `Akun ${data.role === "kepala_sekolah" ? "Kepala Sekolah" : "Bendahara"} berhasil dibuat`
+      );
+      form.reset({ role: "bendahara", nama: "", email: "", password: "", no_hp: "" });
       onOpenChange(false);
       refetch();
     }
@@ -653,11 +688,34 @@ function DialogCreateBendahara({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <ShieldCheck className="w-5 h-5 text-green-600" />
-              Tambah Akun Bendahara
+              Tambah Akun
             </DialogTitle>
-            <DialogDescription>Buat akun baru untuk bendahara sekolah</DialogDescription>
+            <DialogDescription>
+              Buat akun baru untuk Bendahara atau Kepala Sekolah
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={onSubmit} className="space-y-3">
+            <div className="space-y-2">
+              <label className="text-sm font-medium leading-none">Role</label>
+              <Select
+                value={selectedRole}
+                onValueChange={(v) => form.setValue("role", v)}
+              >
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="bendahara">Bendahara</SelectItem>
+                  <SelectItem value="kepala_sekolah" disabled={kepalaSekolahExists}>
+                    Kepala Sekolah{kepalaSekolahExists ? " (sudah terdaftar)" : ""}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              {kepalaSekolahExists && (
+                <p className="text-xs text-muted-foreground">
+                  Akun Kepala Sekolah dibatasi hanya 1. Nonaktifkan atau hapus
+                  akun yang ada dulu di tabel di bawah untuk menggantinya.
+                </p>
+              )}
+            </div>
             <FormInput form={form} name="nama" label="Nama" placeholder="Nama lengkap" />
             <FormInput form={form} name="email" label="Email" placeholder="email@example.com" type="email" />
             <FormInput form={form} name="password" label="Password" placeholder="Minimal 6 karakter" type="password" />
@@ -811,6 +869,7 @@ function DialogEditBendahara({
 
     const formData = new FormData();
     formData.append("id", currentData.id);
+    formData.append("source", currentData.source);
     formData.append("nama", data.nama);
     formData.append("email", data.email);
     formData.append("no_hp", data.no_telp);
@@ -835,7 +894,7 @@ function DialogEditBendahara({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Pencil className="w-5 h-5 text-green-600" />
-              Edit Akun Bendahara
+              Edit Akun {currentData?.source === "kepala_sekolah" ? "Kepala Sekolah" : "Bendahara"}
             </DialogTitle>
             <DialogDescription>Ubah data akun di bawah ini</DialogDescription>
           </DialogHeader>

@@ -40,6 +40,7 @@ const updateAkunWaliSchema = z.object({
 
 const updateAkunBendaharaSchema = z.object({
   id: z.string().min(1),
+  source: z.enum(["bendahara", "kepala_sekolah"]).default("bendahara"),
   nama: z.string().min(1, "Nama wajib diisi"),
   email: z.string().email("Format email tidak valid"),
   no_hp: z.string().min(1, "Nomor telepon wajib diisi"),
@@ -137,7 +138,7 @@ export async function updateAkunWali(prevState: any, formData: FormData) {
 // "bendahara" tidak berubah (tetap `.eq("id", id)` di tabel `admin`).
 const toggleAkunStatusSchema = z.object({
   id: z.string().min(1),
-  source: z.enum(["wali", "bendahara"]),
+  source: z.enum(["wali", "bendahara", "kepala_sekolah"]),
   is_active: z.enum(["true", "false"]),
 });
 
@@ -156,9 +157,10 @@ export async function toggleAkunStatus(prevState: any, formData: FormData) {
   const newStatus = is_active === "true";
   const supabase = await createClient({ isAdmin: true });
 
-  const table = source === "wali" ? "siswa" : "admin";
+  const table =
+    source === "wali" ? "siswa" : source === "kepala_sekolah" ? "kepala_sekolah" : "admin";
   // FIX: kolom pencocokan beda untuk wali (wali_auth_id, bisa banyak baris)
-  // vs bendahara (id, selalu satu baris).
+  // vs bendahara/kepala_sekolah (id, selalu satu baris).
   const matchColumn = source === "wali" ? "wali_auth_id" : "id";
 
   const { error } = await supabase
@@ -173,13 +175,18 @@ export async function toggleAkunStatus(prevState: any, formData: FormData) {
     };
   }
 
+  const labelSource =
+    source === "wali"
+      ? "Wali Siswa (beserta semua anaknya)"
+      : source === "kepala_sekolah"
+      ? "Kepala Sekolah"
+      : "Bendahara";
+
   await writeChangelog({
     supabase,
     namamenu: "Kelola Akun",
     jenisaksi: "UBAH",
-    deskripsi: `${newStatus ? "Mengaktifkan kembali" : "Menonaktifkan"} akun ${
-      source === "wali" ? "Wali Siswa (beserta semua anaknya)" : "Bendahara"
-    } (id: ${id})`,
+    deskripsi: `${newStatus ? "Mengaktifkan kembali" : "Menonaktifkan"} akun ${labelSource} (id: ${id})`,
   });
 
   revalidatePath("/superadmin/bendahara");
@@ -190,6 +197,7 @@ export async function toggleAkunStatus(prevState: any, formData: FormData) {
 export async function updateAkunBendahara(prevState: any, formData: FormData) {
   const parsed = updateAkunBendaharaSchema.safeParse({
     id: formData.get("id"),
+    source: formData.get("source") || "bendahara",
     nama: formData.get("nama"),
     email: formData.get("email"),
     no_hp: formData.get("no_hp"),
@@ -207,7 +215,8 @@ export async function updateAkunBendahara(prevState: any, formData: FormData) {
     };
   }
 
-  const { id, nama, email, no_hp, new_password } = parsed.data;
+  const { id, source, nama, email, no_hp, new_password } = parsed.data;
+  const table = source === "kepala_sekolah" ? "kepala_sekolah" : "admin";
   const supabase = await createClient({ isAdmin: true });
 
   const authUpdate: { email?: string; password?: string } = { email };
@@ -222,7 +231,7 @@ export async function updateAkunBendahara(prevState: any, formData: FormData) {
   }
 
   const { error: dbError } = await supabase
-    .from("admin")
+    .from(table)
     .update({
       nama,
       email,
@@ -242,7 +251,7 @@ export async function updateAkunBendahara(prevState: any, formData: FormData) {
     supabase,
     namamenu: "Kelola Akun",
     jenisaksi: "UBAH",
-    deskripsi: `Mengubah akun Bendahara: ${nama} (${email})${
+    deskripsi: `Mengubah akun ${source === "kepala_sekolah" ? "Kepala Sekolah" : "Bendahara"}: ${nama} (${email})${
       new_password ? " — password diganti" : ""
     }`,
   });
@@ -261,7 +270,7 @@ export async function updateAkunBendahara(prevState: any, formData: FormData) {
 // DB kamu untuk pastikan konsisten dengan asumsi ini.
 export async function deleteAkun(prevState: any, formData: FormData) {
   const id = formData.get("id") as string;
-  const source = formData.get("source") as "wali" | "bendahara";
+  const source = formData.get("source") as "wali" | "bendahara" | "kepala_sekolah";
   const namaAkun = (formData.get("nama_akun") as string) || "-";
 
   if (!id || !source) {
@@ -343,8 +352,14 @@ export async function deleteAkun(prevState: any, formData: FormData) {
   return { status: "success" };
 }
 
-// ─── Create Bendahara (tidak berubah) ──────────────────────────────────────
-const createBendaharaSchema = z.object({
+// ─── Create Bendahara / Kepala Sekolah ─────────────────────────────────────
+// FIX (Kepala Sekolah): dulu cuma bisa bikin Bendahara. Sekarang formnya
+// sama persis, tinggal ditambah `role` ("bendahara" | "kepala_sekolah")
+// yang menentukan tabel tujuan. Kepala Sekolah dibatasi maksimal 1 baris —
+// dicek dulu di sini (selain guard di UI & unique index di DB) supaya
+// pesan errornya jelas kalau ada yang coba lewat request manual.
+const createAkunNonWaliSchema = z.object({
+  role: z.enum(["bendahara", "kepala_sekolah"]),
   nama: z.string().min(1, "Nama wajib diisi"),
   email: z.string().email("Format email tidak valid"),
   password: z.string().min(6, "Password minimal 6 karakter"),
@@ -352,7 +367,8 @@ const createBendaharaSchema = z.object({
 });
 
 export async function createBendahara(prevState: any, formData: FormData) {
-  const parsed = createBendaharaSchema.safeParse({
+  const parsed = createAkunNonWaliSchema.safeParse({
+    role: formData.get("role") || "bendahara",
     nama: formData.get("nama"),
     email: formData.get("email"),
     password: formData.get("password"),
@@ -370,14 +386,29 @@ export async function createBendahara(prevState: any, formData: FormData) {
     };
   }
 
-  const { nama, email, password, no_hp } = parsed.data;
+  const { role, nama, email, password, no_hp } = parsed.data;
+  const table = role === "kepala_sekolah" ? "kepala_sekolah" : "admin";
   const supabase = await createClient({ isAdmin: true });
+
+  // Guard singleton Kepala Sekolah — jaring pengaman selain di UI &
+  // unique index DB (lihat 002_kepala_sekolah_kelola_akun.sql).
+  if (role === "kepala_sekolah") {
+    const { count } = await supabase
+      .from("kepala_sekolah")
+      .select("id", { count: "exact", head: true });
+    if ((count || 0) > 0) {
+      return {
+        status: "error",
+        errors: { _form: ["Akun Kepala Sekolah sudah ada. Nonaktifkan atau hapus akun lama dulu untuk menggantinya."] },
+      };
+    }
+  }
 
   const { data: authData, error: authError } = await supabase.auth.admin.createUser({
     email,
     password,
     email_confirm: true,
-    user_metadata: { role: "admin", nama },
+    user_metadata: { role, nama },
   });
 
   if (authError || !authData.user) {
@@ -388,7 +419,7 @@ export async function createBendahara(prevState: any, formData: FormData) {
   }
 
   const { error: dbError } = await supabase
-    .from("admin")
+    .from(table)
     .upsert(
       {
         id: authData.user.id,
@@ -412,7 +443,7 @@ export async function createBendahara(prevState: any, formData: FormData) {
     supabase,
     namamenu: "Kelola Akun",
     jenisaksi: "TAMBAH",
-    deskripsi: `Menambahkan akun Bendahara baru: ${nama} (${email})`,
+    deskripsi: `Menambahkan akun ${role === "kepala_sekolah" ? "Kepala Sekolah" : "Bendahara"} baru: ${nama} (${email})`,
   });
 
   revalidatePath("/superadmin/bendahara");

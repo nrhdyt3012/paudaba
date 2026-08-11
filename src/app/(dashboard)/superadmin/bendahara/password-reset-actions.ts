@@ -34,7 +34,7 @@ async function ambilRequest(supabase: any, id: string) {
     id: string;
     email: string;
     account_id: string | null;
-    account_role: "admin" | "siswa" | null;
+    account_role: "admin" | "siswa" | "kepala_sekolah" | null;
     account_name: string | null;
     account_phone: string | null;
     status: "pending" | "resolved";
@@ -155,7 +155,11 @@ export async function simpanPasswordBaru(prevState: any, formData: FormData) {
     namamenu: "Kelola Akun",
     jenisaksi: "UBAH",
     deskripsi: `Mereset password akun ${
-      request.account_role === "admin" ? "Bendahara" : "Wali Siswa"
+      request.account_role === "admin"
+        ? "Bendahara"
+        : request.account_role === "kepala_sekolah"
+        ? "Kepala Sekolah"
+        : "Wali Siswa"
     }: ${request.account_name || request.email} (via permintaan lupa password)`,
   });
 

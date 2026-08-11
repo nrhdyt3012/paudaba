@@ -147,8 +147,8 @@ export default function PasswordResetPanel() {
               )}
             </div>
             <DialogDescription>
-              Daftar permintaan lupa password dari Bendahara &amp; Wali Siswa
-              yang menunggu diproses.
+              Daftar permintaan lupa password dari Bendahara, Kepala Sekolah,
+              &amp; Wali Siswa yang menunggu diproses.
             </DialogDescription>
           </DialogHeader>
 
@@ -182,10 +182,16 @@ export default function PasswordResetPanel() {
                           className={`px-2 py-0.5 rounded-full text-xs font-medium ${
                             req.account_role === "admin"
                               ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-100"
+                              : req.account_role === "kepala_sekolah"
+                              ? "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100"
                               : "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100"
                           }`}
                         >
-                          {req.account_role === "admin" ? "Bendahara" : "Wali Siswa"}
+                          {req.account_role === "admin"
+                            ? "Bendahara"
+                            : req.account_role === "kepala_sekolah"
+                            ? "Kepala Sekolah"
+                            : "Wali Siswa"}
                         </span>
                       </TableCell>
                       <TableCell>{req.account_phone || "-"}</TableCell>

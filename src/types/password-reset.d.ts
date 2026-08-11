@@ -2,7 +2,7 @@
 
 export type PasswordResetStatus = "pending" | "resolved";
 
-export type PasswordResetAccountRole = "admin" | "siswa";
+export type PasswordResetAccountRole = "admin" | "siswa" | "kepala_sekolah";
 
 export interface PasswordResetRequest {
   id: string;
