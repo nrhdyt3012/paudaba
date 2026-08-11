@@ -12,6 +12,14 @@ import { z } from "zod";
 // reset password memakai `supabase.auth.admin.updateUserById`, sama
 // seperti pola yang sudah ada sebelumnya di halaman "Kelola Bendahara".
 //
+// FIX (multi-anak per wali): sejak `siswa.id` di-decouple dari
+// `auth.users.id`, satu akun Wali Siswa (satu `wali_auth_id`) bisa
+// menaungi LEBIH DARI SATU baris di tabel `siswa`. Untuk aksi yang
+// menyentuh source "wali" (updateAkunWali, toggleAkunStatus, deleteAkun),
+// `id` yang diterima dari form SEKARANG ADALAH `wali_auth_id`
+// (= auth.users.id si wali), dan operasinya harus match SEMUA baris siswa
+// dengan `wali_auth_id` tsb, bukan cuma satu baris `id`.
+//
 // PENTING soal PASSWORD: Supabase Auth (seperti semua sistem auth yang
 // benar) TIDAK PERNAH menyimpan password asli — hanya hash satu-arah
 // (bcrypt) yang tidak bisa dibalik jadi teks asli. Jadi password yang
@@ -21,13 +29,8 @@ import { z } from "zod";
 // ini — lihat komentar di komponen bendahara.tsx.
 // ════════════════════════════════════════════════════════════════════════
 
-// FIX (permintaan lanjutan): untuk akun Wali Siswa, superadmin sekarang
-// boleh mengubah EMAIL juga (tidak cuma password) — asalkan email baru
-// belum dipakai akun lain (Supabase Auth otomatis menolak kalau bentrok,
-// dan kita tangkap errornya jadi pesan yang ramah). Nama/no WA tetap
-// TIDAK bisa diubah dari sini (tetap lewat menu Data Siswa).
 const updateAkunWaliSchema = z.object({
-  id: z.string().min(1),
+  id: z.string().min(1), // wali_auth_id
   email: z.string().email("Format email tidak valid"),
   new_password: z
     .string()
@@ -58,9 +61,12 @@ function pesanErrorAuth(message: string): string {
     : message;
 }
 
-// ─── Ubah Email & Password akun Wali Siswa (satu-satunya aksi edit yang
-//     tersedia untuk role ini di halaman Kelola Akun — nama/no WA tetap
-//     lewat menu Data Siswa) ────────────────────────────────────────────────
+// ─── Ubah Email & Password akun Wali Siswa ──────────────────────────────────
+// FIX (multi-anak per wali): dulu `.eq("id", id)` cukup karena 1 wali = 1
+// baris siswa. Sekarang `id` = wali_auth_id, jadi update email di tabel
+// `siswa` harus kena SEMUA baris anak milik wali ini sekaligus — pakai
+// `.eq("wali_auth_id", id)` dan `.select()` tanpa `.maybeSingle()` karena
+// baris yang ter-update bisa lebih dari satu.
 export async function updateAkunWali(prevState: any, formData: FormData) {
   const parsed = updateAkunWaliSchema.safeParse({
     id: formData.get("id"),
@@ -93,15 +99,13 @@ export async function updateAkunWali(prevState: any, formData: FormData) {
     };
   }
 
-  // Sinkronkan kolom email di tabel `siswa` juga (dipakai buat tampilan
-  // di Kelola Akun, Data Siswa, dsb — supaya tidak beda dengan email login
-  // yang sebenarnya).
-  const { error: dbError, data: siswaRow } = await supabase
+  // FIX: sinkronkan kolom email di SEMUA baris siswa milik wali ini
+  // (dulu 1 baris, sekarang bisa banyak).
+  const { error: dbError, data: siswaRows } = await supabase
     .from("siswa")
     .update({ email, updatedat: new Date().toISOString() })
-    .eq("id", id)
-    .select("namasiswa")
-    .maybeSingle();
+    .eq("wali_auth_id", id)
+    .select("namasiswa");
 
   if (dbError) {
     return {
@@ -110,11 +114,13 @@ export async function updateAkunWali(prevState: any, formData: FormData) {
     };
   }
 
+  const namaAnak = (siswaRows || []).map((s: any) => s.namasiswa).filter(Boolean).join(", ");
+
   await writeChangelog({
     supabase,
     namamenu: "Kelola Akun",
     jenisaksi: "UBAH",
-    deskripsi: `Mengubah akun Wali Siswa: ${siswaRow?.namasiswa || id} — email jadi ${email}${
+    deskripsi: `Mengubah akun Wali Siswa (orang tua dari: ${namaAnak || id}) — email jadi ${email}${
       new_password ? ", password diganti" : ""
     }`,
   });
@@ -124,10 +130,11 @@ export async function updateAkunWali(prevState: any, formData: FormData) {
 }
 
 // ─── Aktifkan / nonaktifkan akun (Wali Siswa ATAU Bendahara) ─────────────────
-// FIX (arahan dosen pembimbing, disebut "Ubah Hak Akses" di UI): superadmin
-// bisa menonaktifkan akun tanpa menghapusnya secara permanen. Akun yang
-// dinonaktifkan tetap ada datanya, tapi ditolak saat mencoba login (lihat
-// pengecekan `is_active` di src/app/(auth)/login/actions.ts).
+// FIX (multi-anak per wali): untuk source "wali", `id` = wali_auth_id dan
+// harus match kolom `wali_auth_id` di tabel `siswa` (bukan `id`) supaya
+// SEMUA anak dari wali ini ikut ter-nonaktifkan/aktifkan sekaligus —
+// sesuai keputusan: "is_active disinkron ke semua anak". Untuk source
+// "bendahara" tidak berubah (tetap `.eq("id", id)` di tabel `admin`).
 const toggleAkunStatusSchema = z.object({
   id: z.string().min(1),
   source: z.enum(["wali", "bendahara"]),
@@ -150,10 +157,14 @@ export async function toggleAkunStatus(prevState: any, formData: FormData) {
   const supabase = await createClient({ isAdmin: true });
 
   const table = source === "wali" ? "siswa" : "admin";
+  // FIX: kolom pencocokan beda untuk wali (wali_auth_id, bisa banyak baris)
+  // vs bendahara (id, selalu satu baris).
+  const matchColumn = source === "wali" ? "wali_auth_id" : "id";
+
   const { error } = await supabase
     .from(table)
     .update({ is_active: newStatus, updatedat: new Date().toISOString() })
-    .eq("id", id);
+    .eq(matchColumn, id);
 
   if (error) {
     return {
@@ -167,7 +178,7 @@ export async function toggleAkunStatus(prevState: any, formData: FormData) {
     namamenu: "Kelola Akun",
     jenisaksi: "UBAH",
     deskripsi: `${newStatus ? "Mengaktifkan kembali" : "Menonaktifkan"} akun ${
-      source === "wali" ? "Wali Siswa" : "Bendahara"
+      source === "wali" ? "Wali Siswa (beserta semua anaknya)" : "Bendahara"
     } (id: ${id})`,
   });
 
@@ -175,7 +186,7 @@ export async function toggleAkunStatus(prevState: any, formData: FormData) {
   return { status: "success" };
 }
 
-// ─── Update akun Bendahara ─────────────────────────────────────────────────
+// ─── Update akun Bendahara (tidak berubah) ─────────────────────────────────
 export async function updateAkunBendahara(prevState: any, formData: FormData) {
   const parsed = updateAkunBendaharaSchema.safeParse({
     id: formData.get("id"),
@@ -241,6 +252,13 @@ export async function updateAkunBendahara(prevState: any, formData: FormData) {
 }
 
 // ─── Hapus akun (Wali Siswa ATAU Bendahara) ────────────────────────────────
+// FIX (multi-anak per wali): untuk source "wali", `id` = wali_auth_id.
+// Menghapus akun wali harus menghapus SEMUA baris siswa yang menaunginya,
+// bukan cuma satu. Baris siswa dihapus SECARA EKSPLISIT dulu (bukan
+// mengandalkan ON DELETE CASCADE dari FK wali_auth_id -> auth.users),
+// supaya tidak bergantung pada apakah cascade tsb benar-benar terpasang
+// setelah migrasi decouple — cek ulang DDL constraint `wali_auth_id` di
+// DB kamu untuk pastikan konsisten dengan asumsi ini.
 export async function deleteAkun(prevState: any, formData: FormData) {
   const id = formData.get("id") as string;
   const source = formData.get("source") as "wali" | "bendahara";
@@ -252,9 +270,53 @@ export async function deleteAkun(prevState: any, formData: FormData) {
 
   const supabase = await createClient({ isAdmin: true });
 
-  // Hapus user dari Supabase Auth — baris di tabel `siswa`/`admin` akan
-  // ikut terhapus lewat ON DELETE CASCADE (pola yang sama seperti
-  // deleteUser/deleteBendahara sebelumnya).
+  let namaAnakTerhapus: string[] = [];
+
+  if (source === "wali") {
+    const { data: siswaRows, error: fetchError } = await supabase
+      .from("siswa")
+      .select("id, namasiswa")
+      .eq("wali_auth_id", id);
+
+    if (fetchError) {
+      return {
+        status: "error",
+        errors: { _form: [`Gagal mengambil data anak: ${fetchError.message}`] },
+      };
+    }
+
+    namaAnakTerhapus = (siswaRows || []).map((s: any) => s.namasiswa || "-");
+
+    if (siswaRows && siswaRows.length > 0) {
+      // FIX: kalau ada anak yang masih punya tagihan/pembayaran (FK dari
+      // tagihan_siswa/pembayaran/rekapan_* ke siswa.id), delete ini akan
+      // gagal karena FK constraint — perilaku ini SAMA seperti sebelum
+      // multi-anak (dulu juga bergantung pada cascade DB untuk tabel-
+      // tabel turunan itu). UI sudah memblokir hapus kalau ada tagihan
+      // yang SUDAH dibayar (hasPaidTagihan), tapi tagihan yang BELUM
+      // dibayar tetap bisa menyebabkan FK violation di sini — kalau
+      // proyek kamu punya helper "siswa-delete-guard" untuk pembersihan
+      // ini, pertimbangkan dipanggil di sini juga per baris siswa,
+      // bukan raw `.delete()`.
+      const { error: deleteSiswaError } = await supabase
+        .from("siswa")
+        .delete()
+        .eq("wali_auth_id", id);
+
+      if (deleteSiswaError) {
+        return {
+          status: "error",
+          errors: { _form: [`Gagal menghapus data siswa: ${deleteSiswaError.message}`] },
+        };
+      }
+    }
+  }
+
+  // Hapus user dari Supabase Auth. Untuk source "bendahara", baris di
+  // tabel `admin` ikut terhapus lewat ON DELETE CASCADE (pola lama, tidak
+  // berubah — relasi admin.id -> auth.users.id tetap 1:1). Untuk source
+  // "wali", baris siswa sudah dihapus eksplisit di atas, jadi di sini
+  // tinggal hapus user Auth-nya saja.
   const { error: authError } = await supabase.auth.admin.deleteUser(id);
   if (authError) {
     return {
@@ -267,16 +329,21 @@ export async function deleteAkun(prevState: any, formData: FormData) {
     supabase,
     namamenu: "Kelola Akun",
     jenisaksi: "HAPUS",
-    deskripsi: `Menghapus akun ${source === "wali" ? "Wali Siswa" : "Bendahara"}: ${namaAkun}`,
+    deskripsi:
+      source === "wali"
+        ? `Menghapus akun Wali Siswa: ${namaAkun}${
+            namaAnakTerhapus.length > 0
+              ? ` (beserta data anak: ${namaAnakTerhapus.join(", ")})`
+              : ""
+          }`
+        : `Menghapus akun Bendahara: ${namaAkun}`,
   });
 
   revalidatePath("/superadmin/bendahara");
   return { status: "success" };
 }
 
-// ─── Create Bendahara (dipertahankan — akun Wali Siswa dibuat lewat
-//     halaman "Data Siswa" karena butuh field spesifik siswa seperti
-//     NIS/kelas/angkatan, tidak cocok dibuat dari sini) ────────────────────
+// ─── Create Bendahara (tidak berubah) ──────────────────────────────────────
 const createBendaharaSchema = z.object({
   nama: z.string().min(1, "Nama wajib diisi"),
   email: z.string().email("Format email tidak valid"),
@@ -320,14 +387,6 @@ export async function createBendahara(prevState: any, formData: FormData) {
     };
   }
 
-  // FIX: trigger `handle_new_user()` di database sudah otomatis insert baris
-  // ke `public.admin` (id, email) begitu user Auth dibuat dengan metadata
-  // role: "admin" — trigger membaca `nama` dari key metadata "name" (bukan
-  // "nama"), jadi kolom `nama` di baris yang dibuat trigger tetap NULL, dan
-  // kolom `nohp` memang tidak diisi trigger sama sekali.
-  // Pakai UPSERT (bukan update biasa) supaya tidak bergantung pada apakah
-  // baris sudah sempat dibuat trigger atau belum — kalau baris dengan id
-  // ini sudah ada, dilengkapi; kalau belum ada, langsung dibuat.
   const { error: dbError } = await supabase
     .from("admin")
     .upsert(
@@ -342,8 +401,6 @@ export async function createBendahara(prevState: any, formData: FormData) {
     );
 
   if (dbError) {
-    // Rollback: hapus user Auth yang sudah terlanjur dibuat kalau
-    // pelengkapan data di tabel admin gagal.
     await supabase.auth.admin.deleteUser(authData.user.id);
     return {
       status: "error",

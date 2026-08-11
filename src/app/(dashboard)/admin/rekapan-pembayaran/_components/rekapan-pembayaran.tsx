@@ -1,5 +1,6 @@
 "use client";
 
+import DropdownAction from "@/components/common/dropdown-action";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -149,19 +150,22 @@ const MonthYearPicker = ({
   );
 };
 
-// ─── Tombol Cetak Kwitansi per transaksi ───────────────────────────────────────
-function PrintButtonRekap({
+// ─── Menu Aksi per transaksi (Cetak Kwitansi + Lihat Bukti Pembayaran) ─────────
+function ActionMenuRekap({
   item,
   sekolah,
+  onPreviewBukti,
 }: {
   item: any;
   sekolah: SekolahInfo | null | undefined;
+  onPreviewBukti: (url: string) => void;
 }) {
   const contentRef = useRef<HTMLDivElement>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
 
   const tagihan = first(item.tagihan_siswa);
   const siswa = first(tagihan?.siswa);
+  const hasBukti = !!item.bukti_pembayaran_url;
 
   const handlePrint = useReactToPrint({
     contentRef,
@@ -221,17 +225,46 @@ function PrintButtonRekap({
     // karena butuh query tambahan per siswa. Bisa ditambahkan kalau perlu.
   };
 
+  // Kalau tidak ada bukti pembayaran, opsi tetap tampil (memudar) tapi
+  // tetap bisa diklik dan akan menampilkan toast pemberitahuan.
+  const handleLihatBukti = () => {
+    if (!hasBukti) {
+      toast.error("Tidak ada bukti pembayaran untuk transaksi ini");
+      return;
+    }
+    onPreviewBukti(item.bukti_pembayaran_url);
+  };
+
   return (
     <>
-      <Button
-        onClick={handlePrint}
-        size="sm"
-        variant="outline"
-        className="h-8 gap-1.5"
-      >
-        <Printer className="h-3.5 w-3.5" />
-        Cetak Kwitansi
-      </Button>
+      {/* FIX: pakai DropdownAction (titik 3) yang sama dengan halaman lain,
+          bukan bikin dropdown sendiri, biar konsisten sama menu-management dkk */}
+      <DropdownAction
+        menu={[
+          {
+            label: (
+              <span className="flex items-center gap-2">
+                <Printer className="w-4 h-4" />
+                Cetak Kwitansi
+              </span>
+            ),
+            action: handlePrint,
+          },
+          {
+            label: (
+              // Kalau tidak ada bukti, opsi ini memudar tapi tetap bisa
+              // diklik -> munculkan toast lewat handleLihatBukti di bawah
+              <span className={`flex items-center gap-2 ${!hasBukti ? "opacity-40" : ""}`}>
+                <ImageIcon className="w-4 h-4" />
+                Lihat Bukti Pembayaran
+              </span>
+            ),
+            action: handleLihatBukti,
+          },
+        ]}
+      />
+
+      {/* Konten cetak kwitansi, disembunyikan, dipicu lewat handlePrint */}
       <div className="hidden">
         <div ref={contentRef}>
           <KwitansiTemplate data={kwitansiData} />
@@ -580,22 +613,13 @@ const { data: sekolahInfo } = useQuery({
                         <td className="p-3">
                           {new Date(item.tanggalpembayaran).toLocaleDateString("id-ID")}
                         </td>
-                        {/* Aksi: cetak kwitansi + lihat bukti pembayaran */}
+                        {/* Aksi: satu tombol dropdown berisi Cetak Kwitansi & Lihat Bukti Pembayaran */}
                         <td className="p-3 text-center">
-                          <div className="flex items-center justify-center gap-1.5">
-                            <PrintButtonRekap item={item} sekolah={sekolahInfo} />
-                            {item.bukti_pembayaran_url ? (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-8 gap-1.5"
-                                onClick={() => setBuktiPreviewUrl(item.bukti_pembayaran_url)}
-                              >
-                                <ImageIcon className="h-3.5 w-3.5" />
-                                Lihat Bukti Pembayaran
-                              </Button>
-                            ) : null}
-                          </div>
+                          <ActionMenuRekap
+                            item={item}
+                            sekolah={sekolahInfo}
+                            onPreviewBukti={setBuktiPreviewUrl}
+                          />
                         </td>
                       </tr>
                     );
