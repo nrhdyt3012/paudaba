@@ -3,7 +3,11 @@
 import DataTable from "@/components/common/data-table";
 import DropdownAction from "@/components/common/dropdown-action";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogTrigger } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog, DialogClose, DialogContent, DialogDescription,
+  DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -11,8 +15,10 @@ import {
 import useDataTable from "@/hooks/use-data-table";
 import { createClient } from "@/lib/supabase/client";
 import { useQuery } from "@tanstack/react-query";
-import { Pencil, Plus, Trash2, Download } from "lucide-react";
-import { useMemo, useState } from "react";
+import {
+  Pencil, Plus, Trash2, Download, Loader2, PowerOff, Power, ArrowUpCircle,
+} from "lucide-react";
+import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { HEADER_TABLE_USER } from "@/constants/user-constant";
 import DialogCreateUser from "./dialog-create-user";
@@ -21,6 +27,7 @@ import DialogDeleteUser from "./dialog-delete-user";
 import { Profile } from "@/types/auth";
 import * as XLSX from "xlsx";
 import DialogImportUser from "./dialog-import-user";
+import { deleteUser, updateStatusSiswa, promoteKelasSiswa } from "../actions";
 
 const KELAS_FILTER_OPTIONS = [
   { value: "semua", label: "Semua Kelas" },
@@ -40,6 +47,16 @@ const SORT_OPTIONS = [
   { value: "nis", label: "NIS (Kecil → Besar)" },
   { value: "nama", label: "Nama (A → Z)" },
 ];
+
+// FIX (checkbox multi-select): urutan jenjang untuk fitur "Promosikan
+// Kelas Terpilih". Siswa di jenjang tertinggi (TK B) otomatis dilewati
+// kalau ikut terpilih — tidak ada jenjang berikutnya untuk dipromosikan.
+const URUTAN_KELAS = ["KB", "TK A", "TK B"];
+function kelasBerikutnya(kelasSekarang: string | null | undefined): string | null {
+  const idx = URUTAN_KELAS.indexOf(kelasSekarang || "");
+  if (idx === -1 || idx === URUTAN_KELAS.length - 1) return null;
+  return URUTAN_KELAS[idx + 1];
+}
 
 // FIX: helper normalisasi jenis kelamin — data lama kadang tersimpan
 // beda-beda casing/singkatan ("Laki-laki"/"laki-laki"/"L"), jadi filter
@@ -179,8 +196,156 @@ export default function UserManagement() {
     [filteredSorted, currentPage, currentLimit]
   );
 
+  // ─── FIX: checkbox multi-select & aksi massal ──────────────────────────────
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [showBulkDeactivateDialog, setShowBulkDeactivateDialog] = useState(false);
+  const [showBulkActivateDialog, setShowBulkActivateDialog] = useState(false);
+  const [showBulkPromoteDialog, setShowBulkPromoteDialog] = useState(false);
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+  const [isBulkPending, startBulkAction] = useTransition();
+
+  const currentPageIds = useMemo(() => paginatedRows.map((r: any) => r.id), [paginatedRows]);
+  const isAllSelectedOnPage =
+    currentPageIds.length > 0 && currentPageIds.every((id) => selectedIds.includes(id));
+
+  const handleToggleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...currentPageIds])));
+    } else {
+      setSelectedIds((prev) => prev.filter((id) => !currentPageIds.includes(id)));
+    }
+  };
+
+  const handleToggleRow = (id: string, checked: boolean) => {
+    setSelectedIds((prev) => (checked ? [...prev, id] : prev.filter((x) => x !== id)));
+  };
+
+  // Diambil dari `filteredSorted` (bukan cuma halaman aktif), supaya
+  // seleksi tetap konsisten kalau bendahara pindah halaman.
+  const selectedRows = useMemo(
+    () => filteredSorted.filter((r: any) => selectedIds.includes(r.id)),
+    [filteredSorted, selectedIds]
+  );
+
+  // Preview untuk dialog promosi: kelompokkan per kelas asal, tandai mana
+  // yang punya jenjang berikutnya vs yang akan dilewati (sudah TK B).
+  const promotePreview = useMemo(() => {
+    const groups = new Map<string, { total: number; tujuan: string | null }>();
+    selectedRows.forEach((r: any) => {
+      const asal = r.kelas || "-";
+      const tujuan = kelasBerikutnya(r.kelas);
+      if (!groups.has(asal)) groups.set(asal, { total: 0, tujuan });
+      groups.get(asal)!.total += 1;
+    });
+    return Array.from(groups.entries()).map(([asal, v]) => ({ asal, ...v }));
+  }, [selectedRows]);
+
+  const jumlahBisaDipromosikan = selectedRows.filter((r: any) => kelasBerikutnya(r.kelas)).length;
+  const jumlahDilewatiPromosi = selectedRows.length - jumlahBisaDipromosikan;
+
+  const confirmBulkStatus = (statusBaru: "aktif" | "tidak aktif") => {
+    startBulkAction(async () => {
+      const results = await Promise.all(
+        selectedRows.map(async (r: any) => {
+          const formData = new FormData();
+          formData.append("id", r.id);
+          formData.append("status", statusBaru);
+          return updateStatusSiswa({}, formData);
+        })
+      );
+
+      const failedCount = results.filter((res) => res.status === "error").length;
+      const successCount = results.length - failedCount;
+
+      if (successCount > 0) {
+        toast.success(
+          `${successCount} siswa berhasil ${statusBaru === "aktif" ? "diaktifkan" : "dinonaktifkan"}`
+        );
+      }
+      if (failedCount > 0) {
+        toast.error(`${failedCount} siswa gagal diubah statusnya`);
+      }
+
+      setSelectedIds([]);
+      setShowBulkDeactivateDialog(false);
+      setShowBulkActivateDialog(false);
+      refetch();
+    });
+  };
+
+  const confirmBulkPromote = () => {
+    startBulkAction(async () => {
+      const promotable = selectedRows.filter((r: any) => kelasBerikutnya(r.kelas));
+
+      if (promotable.length === 0) {
+        toast.error("Tidak ada siswa yang bisa dipromosikan", {
+          description: "Semua siswa terpilih sudah berada di jenjang tertinggi (TK B).",
+        });
+        setShowBulkPromoteDialog(false);
+        return;
+      }
+
+      const results = await Promise.all(
+        promotable.map(async (r: any) => {
+          const formData = new FormData();
+          formData.append("id", r.id);
+          formData.append("kelas_baru", kelasBerikutnya(r.kelas)!);
+          return promoteKelasSiswa({}, formData);
+        })
+      );
+
+      const failedCount = results.filter((res) => res.status === "error").length;
+      const successCount = results.length - failedCount;
+
+      if (successCount > 0) toast.success(`${successCount} siswa berhasil dipromosikan kelas`);
+      if (failedCount > 0) toast.error(`${failedCount} siswa gagal dipromosikan`);
+
+      setSelectedIds([]);
+      setShowBulkPromoteDialog(false);
+      refetch();
+    });
+  };
+
+  const confirmBulkDelete = () => {
+    startBulkAction(async () => {
+      const results = await Promise.all(
+        selectedRows.map(async (r: any) => {
+          const formData = new FormData();
+          formData.append("id", r.id);
+          const res = await deleteUser({} as any, formData);
+          return { nama: r.namasiswa || "-", res };
+        })
+      );
+
+      const gagal = results.filter((r) => r.res.status === "error");
+      const berhasil = results.length - gagal.length;
+
+      if (berhasil > 0) toast.success(`${berhasil} siswa berhasil dihapus`);
+      if (gagal.length > 0) {
+        toast.error(`${gagal.length} siswa gagal dihapus`, {
+          description: gagal
+            .map((g) => `${g.nama}: ${g.res.errors?._form?.[0] || "gagal"}`)
+            .join(" | "),
+        });
+      }
+
+      setSelectedIds([]);
+      setShowBulkDeleteDialog(false);
+      refetch();
+    });
+  };
+  // ────────────────────────────────────────────────────────────────────────
+
   const filteredData = useMemo(() => {
     return paginatedRows.map((item: any, index: number) => [
+      // FIX: kolom checkbox pilih baris, ditaruh paling depan
+      <Checkbox
+        key={`select-${item.id}`}
+        checked={selectedIds.includes(item.id)}
+        onCheckedChange={(checked) => handleToggleRow(item.id, !!checked)}
+        aria-label={`Pilih ${item.namasiswa}`}
+      />,
+
       currentLimit * (currentPage - 1) + index + 1,
 
       // NIS
@@ -218,17 +383,26 @@ export default function UserManagement() {
       </span>,
 
       // Kelas
-      <span
-        key={`kelas-${item.id}`}
-        className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100"
-      >
-        {item.kelas || "-"}
-      </span>,
+      // FIX: kalau status akademik siswa "tidak aktif", tampilkan penanda
+      // kecil di sebelah badge Kelas — BUKAN mengembalikan kolom Status
+      // yang sudah sengaja dihapus (itu soal is_active/login, sudah
+      // dipindah ke Kelola Akun). Ini murni indikator visual status
+      // akademik per-anak biar efek "Nonaktifkan Terpilih" kelihatan.
+      <div key={`kelas-${item.id}`} className="flex items-center gap-1.5">
+        <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100">
+          {item.kelas || "-"}
+        </span>
+        {item.status === "tidak aktif" && (
+          <span className="px-2 py-0.5 rounded-full text-[10px] bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+            Nonaktif
+          </span>
+        )}
+      </div>,
 
       // Angkatan
       item.angkatan || "-",
 
-      // Tipe SPP ← kolom baru
+      // Tipe SPP
       <span
         key={`tipe-${item.id}`}
         className={`px-2 py-1 rounded-full text-xs font-medium capitalize ${
@@ -239,10 +413,6 @@ export default function UserManagement() {
       >
         {item.tipe_spp || "reguler"}
       </span>,
-
-      // FIX: kolom Status dihapus dari halaman ini (arahan kamu) — status
-      // keaktifan akun sekarang dikendalikan terpusat dari menu Kelola
-      // Akun (kolom `is_active`), tidak perlu duplikasi konsep di sini.
 
       // Aksi
       <DropdownAction
@@ -270,9 +440,6 @@ export default function UserManagement() {
                   tanggalLahir: item.tanggallahir,
                   jeniskelamin: item.jeniskelamin,
                   tipe_spp: item.tipe_spp || "reguler",
-                  // FIX: alamat sebelumnya kelewat, belum ikut ke-prefill
-                  // di dialog Edit (cuma tampil di tabel). "status" dihapus
-                  // dari sini (kolomnya sudah tidak dipakai lagi).
                   alamat: item.alamat,
                   role: "siswa",
                 } as Profile & { jeniskelamin?: string; tipe_spp?: string },
@@ -302,7 +469,7 @@ export default function UserManagement() {
         ]}
       />,
     ]);
-  }, [paginatedRows]);
+  }, [paginatedRows, selectedIds]);
 
   return (
     <div className="w-full">
@@ -317,8 +484,6 @@ export default function UserManagement() {
             className="w-full sm:w-56"
             onChange={(e) => handleChangeSearch(e.target.value)}
           />
-          {/* FIX: filter Kelas & Jenis Kelamin (pola sama seperti popup
-              dashboard), plus dropdown sortir NIS/Nama. */}
           <Select
             value={filterKelas}
             onValueChange={(v) => { setFilterKelas(v); handleChangePage(1); }}
@@ -369,8 +534,71 @@ export default function UserManagement() {
         </div>
       </div>
 
+      {/* FIX: bar aksi massal, cuma muncul kalau ada baris yang dipilih */}
+      {selectedIds.length > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-muted/50 border rounded-lg px-4 py-2 mb-3">
+          <p className="text-sm">
+            <span className="font-semibold">{selectedIds.length}</span> siswa dipilih
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setSelectedIds([])}>
+              Batal
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-green-300 text-green-700 hover:bg-green-50"
+              onClick={() => setShowBulkActivateDialog(true)}
+            >
+              <Power className="w-4 h-4 mr-2" />
+              Aktifkan Terpilih
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-amber-300 text-amber-700 hover:bg-amber-50"
+              onClick={() => setShowBulkDeactivateDialog(true)}
+            >
+              <PowerOff className="w-4 h-4 mr-2" />
+              Nonaktifkan Terpilih
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-blue-300 text-blue-700 hover:bg-blue-50"
+              onClick={() => setShowBulkPromoteDialog(true)}
+            >
+              <ArrowUpCircle className="w-4 h-4 mr-2" />
+              Promosikan Kelas Terpilih
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setShowBulkDeleteDialog(true)}
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Hapus Terpilih
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* FIX: kontrol "pilih semua" terpisah di atas tabel, karena prop
+          `header` DataTable bertipe string[] jadi tidak bisa diselipi
+          elemen Checkbox langsung di dalam array header. */}
+      {paginatedRows.length > 0 && (
+        <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none mb-2">
+          <Checkbox
+            checked={isAllSelectedOnPage}
+            onCheckedChange={(checked) => handleToggleSelectAll(!!checked)}
+            aria-label="Pilih semua di halaman ini"
+          />
+          Pilih semua di halaman ini
+        </label>
+      )}
+
       <DataTable
-        header={HEADER_TABLE_USER}
+        header={["Pilih", ...HEADER_TABLE_USER]}
         data={filteredData}
         isLoading={isLoading}
         totalPages={totalPages}
@@ -393,6 +621,165 @@ export default function UserManagement() {
         currentData={selectedAction?.data}
         handleChangeAction={handleChangeAction}
       />
+
+      {/* FIX: dialog konfirmasi nonaktifkan massal (status akademik, BUKAN
+          is_active/login — lihat komentar di actions.ts) */}
+      <Dialog open={showBulkDeactivateDialog} onOpenChange={setShowBulkDeactivateDialog}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <PowerOff className="w-5 h-5" />
+              Nonaktifkan {selectedIds.length} Siswa?
+            </DialogTitle>
+            <DialogDescription>
+              Status akademik siswa terpilih akan diubah jadi{" "}
+              <strong>&quot;tidak aktif&quot;</strong> (misalnya karena lulus atau pindah
+              sekolah). Ini <strong>tidak memengaruhi akses login</strong> wali mereka —
+              itu tetap dikelola terpisah lewat menu Kelola Akun.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowBulkDeactivateDialog(false)}
+              disabled={isBulkPending}
+            >
+              Batal
+            </Button>
+            <Button
+              onClick={() => confirmBulkStatus("tidak aktif")}
+              disabled={isBulkPending}
+              className="bg-amber-600 hover:bg-amber-700"
+            >
+              {isBulkPending ? <Loader2 className="animate-spin w-4 h-4" /> : "Ya, Nonaktifkan"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* FIX: dialog konfirmasi aktifkan massal (kebalikan dari di atas) */}
+      <Dialog open={showBulkActivateDialog} onOpenChange={setShowBulkActivateDialog}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-green-600">
+              <Power className="w-5 h-5" />
+              Aktifkan {selectedIds.length} Siswa?
+            </DialogTitle>
+            <DialogDescription>
+              Status akademik siswa terpilih akan diubah kembali jadi{" "}
+              <strong>&quot;aktif&quot;</strong>.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowBulkActivateDialog(false)}
+              disabled={isBulkPending}
+            >
+              Batal
+            </Button>
+            <Button
+              onClick={() => confirmBulkStatus("aktif")}
+              disabled={isBulkPending}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              {isBulkPending ? <Loader2 className="animate-spin w-4 h-4" /> : "Ya, Aktifkan"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* FIX: dialog konfirmasi promosi kelas massal, dengan preview
+          breakdown per kelas asal -> tujuan */}
+      <Dialog open={showBulkPromoteDialog} onOpenChange={setShowBulkPromoteDialog}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-blue-600">
+              <ArrowUpCircle className="w-5 h-5" />
+              Promosikan {selectedIds.length} Siswa?
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-2">
+                <ul className="text-sm list-disc list-inside">
+                  {promotePreview.map((g) => (
+                    <li key={g.asal}>
+                      {g.total} siswa {g.asal}{" "}
+                      {g.tujuan ? (
+                        <>→ <strong>{g.tujuan}</strong></>
+                      ) : (
+                        <span className="text-muted-foreground">(dilewati, sudah jenjang tertinggi)</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                {jumlahDilewatiPromosi > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {jumlahDilewatiPromosi} siswa TK B dilewati karena tidak ada jenjang
+                    berikutnya.
+                  </p>
+                )}
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowBulkPromoteDialog(false)}
+              disabled={isBulkPending}
+            >
+              Batal
+            </Button>
+            <Button
+              onClick={confirmBulkPromote}
+              disabled={isBulkPending || jumlahBisaDipromosikan === 0}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {isBulkPending ? (
+                <Loader2 className="animate-spin w-4 h-4" />
+              ) : (
+                `Ya, Promosikan (${jumlahBisaDipromosikan})`
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* FIX: dialog konfirmasi hapus massal — tiap siswa tetap dicek lewat
+          guard pembayaran yang sudah ada (cekSiswaBisaDihapus), jadi kalau
+          ada yang sudah pernah bayar, baris itu akan gagal & dilaporkan
+          lewat toast, bukan diam-diam ke-skip. */}
+      <Dialog open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <Trash2 className="w-5 h-5" />
+              Hapus {selectedIds.length} Siswa?
+            </DialogTitle>
+            <DialogDescription>
+              Tindakan ini <strong>tidak dapat dibatalkan</strong>. Siswa yang sudah
+              punya riwayat pembayaran akan otomatis ditolak sistem dan dilaporkan,
+              bukan ikut terhapus. Kalau cuma ingin menandai siswa sudah tidak
+              aktif sekolah, gunakan &quot;Nonaktifkan Terpilih&quot; saja.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowBulkDeleteDialog(false)}
+              disabled={isBulkPending}
+            >
+              Batal
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmBulkDelete}
+              disabled={isBulkPending}
+            >
+              {isBulkPending ? <Loader2 className="animate-spin w-4 h-4" /> : "Ya, Hapus"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

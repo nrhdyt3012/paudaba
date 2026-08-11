@@ -128,7 +128,6 @@ export async function createUser(prevState: AuthFormState, formData: FormData) {
 }
 
 // ─── Cari Wali yang Sudah Terdaftar (untuk form Tambah Siswa) ─────────────────
-// ─── Cari Wali yang Sudah Terdaftar (untuk form Tambah Siswa) ─────────────────
 // Bisa dicari lewat email, nama wali, atau nomor WA — tidak cuma email saja.
 export async function searchWaliByEmail(query: string) {
   if (!query || query.trim().length < 2) return [];
@@ -278,6 +277,88 @@ export async function updateUser(prevState: AuthFormState, formData: FormData) {
     namamenu: "Data Siswa",
     jenisaksi: "UBAH",
     deskripsi: `Mengubah data siswa: ${data_.nama_siswa} (SPP ${data_.tipe_spp})${deskripsiTambahan}`,
+  });
+
+  revalidatePath("/admin/user");
+  return { status: "success" };
+}
+
+// ─── Ubah status akademik siswa (aktif / tidak aktif) — satuan & dipanggil
+//     berulang untuk aksi massal dari client ─────────────────────────────────
+// FIX (checkbox multi-select di Data Siswa): field `status` di sini BEDA
+// dari `is_active` yang dikelola di Kelola Akun. `is_active` = akses login
+// wali (disinkron ke semua anak dari wali yang sama). `status` = status
+// akademik SATU ANAK (aktif belajar / sudah tidak aktif — lulus, pindah,
+// dsb), independen per siswa walau satu wali punya beberapa anak. Jadi
+// action ini TIDAK menyentuh tabel auth / kolom is_active sama sekali.
+export async function updateStatusSiswa(prevState: any, formData: FormData) {
+  const id = formData.get("id") as string;
+  const statusBaru = formData.get("status") as string;
+
+  if (!id || (statusBaru !== "aktif" && statusBaru !== "tidak aktif")) {
+    return { status: "error", errors: { _form: ["Data tidak valid"] } };
+  }
+
+  const supabase = await createClient({ isAdmin: true });
+
+  const { data: siswaRow, error } = await supabase
+    .from("siswa")
+    .update({ status: statusBaru, updatedat: new Date().toISOString() })
+    .eq("id", id)
+    .select("namasiswa")
+    .maybeSingle();
+
+  if (error) {
+    return {
+      status: "error",
+      errors: { _form: [`Gagal mengubah status siswa: ${error.message}`] },
+    };
+  }
+
+  await writeChangelog({
+    supabase,
+    namamenu: "Data Siswa",
+    jenisaksi: "UBAH",
+    deskripsi: `Mengubah status siswa ${siswaRow?.namasiswa || id} menjadi "${statusBaru}"`,
+  });
+
+  revalidatePath("/admin/user");
+  return { status: "success" };
+}
+
+// ─── Promosikan kelas siswa (KB → TK A → TK B) — satuan & dipanggil
+//     berulang untuk aksi massal dari client ─────────────────────────────────
+const KELAS_VALID = ["KB", "TK A", "TK B"];
+
+export async function promoteKelasSiswa(prevState: any, formData: FormData) {
+  const id = formData.get("id") as string;
+  const kelasBaru = formData.get("kelas_baru") as string;
+
+  if (!id || !kelasBaru || !KELAS_VALID.includes(kelasBaru)) {
+    return { status: "error", errors: { _form: ["Data tidak valid"] } };
+  }
+
+  const supabase = await createClient({ isAdmin: true });
+
+  const { data: siswaRow, error } = await supabase
+    .from("siswa")
+    .update({ kelas: kelasBaru, updatedat: new Date().toISOString() })
+    .eq("id", id)
+    .select("namasiswa")
+    .maybeSingle();
+
+  if (error) {
+    return {
+      status: "error",
+      errors: { _form: [`Gagal memindahkan kelas: ${error.message}`] },
+    };
+  }
+
+  await writeChangelog({
+    supabase,
+    namamenu: "Data Siswa",
+    jenisaksi: "UBAH",
+    deskripsi: `Mempromosikan kelas siswa ${siswaRow?.namasiswa || id} ke ${kelasBaru}`,
   });
 
   revalidatePath("/admin/user");
@@ -452,11 +533,11 @@ export async function importUsersBulk(rows: ImportRow[]): Promise<ImportResult> 
         waliAuthId = authData.user.id;
       }
 
-      emailToWaliId.set(emailLower, waliAuthId);
+      emailToWaliId.set(emailLower, waliAuthId!);
     }
 
     const { error: insertError } = await supabase.from("siswa").insert({
-      wali_auth_id: waliAuthId,
+      wali_auth_id: waliAuthId!,
       email: validated.data.email,
       namasiswa: validated.data.nama_siswa,
       nis: validated.data.NIS || null,
