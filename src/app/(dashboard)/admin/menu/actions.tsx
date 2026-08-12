@@ -100,6 +100,48 @@ export async function updateMenu(prevState: MenuFormState, formData: FormData) {
   return { status: "success" };
 }
 
+// FIX: dipisah jadi helper supaya logic cascade delete (hapus semua data
+// turunan dari satu idtagihansiswa) bisa dipakai bareng-bareng oleh
+// deleteMenu (single) maupun deleteManyMenu (bulk), tanpa duplikasi.
+async function cascadeDeleteTagihanSiswa(supabase: any, idTagihanSiswa: number) {
+  // Hapus rekapan_tunggakan
+  await supabase
+    .from("rekapan_tunggakan")
+    .delete()
+    .eq("idtagihansiswa", idTagihanSiswa);
+
+  // Hapus pembayaran yang gagal/pending beserta log gateway-nya
+  const { data: pembayaranList } = await supabase
+    .from("pembayaran")
+    .select("idpembayaran")
+    .eq("idtagihansiswa", idTagihanSiswa);
+
+  if (pembayaranList && pembayaranList.length > 0) {
+    const idPembayaranList = pembayaranList.map((p: any) => p.idpembayaran);
+    await supabase
+      .from("payment_gateway_log")
+      .delete()
+      .in("idpembayaran", idPembayaranList);
+
+    await supabase
+      .from("pembayaran")
+      .delete()
+      .in("idpembayaran", idPembayaranList);
+  }
+
+  // Hapus log notifikasi WhatsApp
+  await supabase
+    .from("whatsapp_notification_logs")
+    .delete()
+    .eq("target_id", idTagihanSiswa);
+
+  // Hapus tagihan_siswa itu sendiri
+  await supabase
+    .from("tagihan_siswa")
+    .delete()
+    .eq("idtagihansiswa", idTagihanSiswa);
+}
+
 export async function deleteMenu(prevState: MenuFormState, formData: FormData) {
   const supabase = await createClient({ isAdmin: true });
   const id = parseInt(formData.get("id") as string);
@@ -117,45 +159,8 @@ export async function deleteMenu(prevState: MenuFormState, formData: FormData) {
     .eq("idmastertagihan", id);
 
   if (tagihanList && tagihanList.length > 0) {
-    // Hapus semua tagihan_siswa yang terkait terlebih dahulu
-    // (beserta data turunannya: pembayaran, rekapan_tunggakan, etc)
     for (const tagihan of tagihanList) {
-      // Hapus rekapan_tunggakan
-      await supabase
-        .from("rekapan_tunggakan")
-        .delete()
-        .eq("idtagihansiswa", tagihan.idtagihansiswa);
-
-      // Hapus pembayaran yang gagal/pending
-      const { data: pembayaranList } = await supabase
-        .from("pembayaran")
-        .select("idpembayaran")
-        .eq("idtagihansiswa", tagihan.idtagihansiswa);
-
-      if (pembayaranList && pembayaranList.length > 0) {
-        const idPembayaranList = pembayaranList.map((p: any) => p.idpembayaran);
-        await supabase
-          .from("payment_gateway_log")
-          .delete()
-          .in("idpembayaran", idPembayaranList);
-        
-        await supabase
-          .from("pembayaran")
-          .delete()
-          .in("idpembayaran", idPembayaranList);
-      }
-
-      // Hapus log notifikasi WhatsApp
-      await supabase
-        .from("whatsapp_notification_logs")
-        .delete()
-        .eq("target_id", tagihan.idtagihansiswa);
-
-      // Hapus tagihan_siswa itu sendiri
-      await supabase
-        .from("tagihan_siswa")
-        .delete()
-        .eq("idtagihansiswa", tagihan.idtagihansiswa);
+      await cascadeDeleteTagihanSiswa(supabase, tagihan.idtagihansiswa);
     }
   }
 
@@ -173,6 +178,59 @@ export async function deleteMenu(prevState: MenuFormState, formData: FormData) {
     namamenu: "Master Tagihan",
     jenisaksi: "HAPUS",
     deskripsi: `Menghapus master tagihan "${existing?.namatagihan || `#${id}`}" dan ${tagihanList?.length || 0} tagihan yang terkait`,
+  });
+
+  revalidatePath("/admin/menu");
+  return { status: "success" };
+}
+
+// FIX: hapus banyak master tagihan sekaligus (untuk fitur pilih banyak /
+// bulk delete di halaman Master Tagihan). Dipanggil langsung dari client
+// component (bukan lewat <form action>), karena jumlah id-nya dinamis.
+export async function deleteManyMenu(ids: number[]) {
+  if (!ids || ids.length === 0) {
+    return { status: "error", message: "Tidak ada data yang dipilih" };
+  }
+
+  const supabase = await createClient({ isAdmin: true });
+
+  const { data: existingList } = await supabase
+    .from("master_tagihan")
+    .select("id_mastertagihan, namatagihan")
+    .in("id_mastertagihan", ids);
+
+  let totalTagihanTerkait = 0;
+
+  for (const id of ids) {
+    const { data: tagihanList } = await supabase
+      .from("tagihan_siswa")
+      .select("idtagihansiswa")
+      .eq("idmastertagihan", id);
+
+    if (tagihanList && tagihanList.length > 0) {
+      totalTagihanTerkait += tagihanList.length;
+      for (const tagihan of tagihanList) {
+        await cascadeDeleteTagihanSiswa(supabase, tagihan.idtagihansiswa);
+      }
+    }
+  }
+
+  const { error } = await supabase
+    .from("master_tagihan")
+    .delete()
+    .in("id_mastertagihan", ids);
+
+  if (error) {
+    return { status: "error", message: error.message };
+  }
+
+  const namaList = (existingList || []).map((m: any) => m.namatagihan).join(", ");
+
+  await writeChangelog({
+    supabase,
+    namamenu: "Master Tagihan",
+    jenisaksi: "HAPUS",
+    deskripsi: `Menghapus ${ids.length} master tagihan sekaligus (${namaList}) beserta ${totalTagihanTerkait} tagihan yang terkait`,
   });
 
   revalidatePath("/admin/menu");

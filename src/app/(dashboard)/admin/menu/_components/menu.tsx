@@ -3,7 +3,16 @@
 import DataTable from "@/components/common/data-table";
 import DropdownAction from "@/components/common/dropdown-action";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogTrigger } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -13,13 +22,15 @@ import { createClient } from "@/lib/supabase/client";
 import { convertIDR } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowUpDown, Pencil, Plus, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Menu } from "@/validations/menu-validation";
 import { HEADER_TABLE_MENU } from "@/constants/menu-constant";
 import DialogCreateMenu from "./dialog-create-menu";
 import DialogUpdateMenu from "./dialog-update-menu";
 import DialogDeleteMenu from "./dialog-delete-menu";
+// FIX: action baru untuk hapus banyak master tagihan sekaligus
+import { deleteManyMenu } from "@/app/(dashboard)/admin/menu/actions";
 
 const JENJANG_FILTER_OPTIONS = [
   { value: "semua", label: "Semua Jenjang" },
@@ -114,8 +125,55 @@ export default function MenuManagement() {
   const [selectedAction, setSelectedAction] = useState<{ data: Menu; type: "update" | "delete" } | null>(null);
   const handleChangeAction = (open: boolean) => { if (!open) setSelectedAction(null); };
 
+  // ─── FIX: state & handler untuk fitur pilih banyak (bulk select) ─────────
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+  const [isBulkDeleting, startBulkDelete] = useTransition();
+
+  const currentPageIds = useMemo(
+    () => (menus?.data || []).map((item: any) => item.id_mastertagihan),
+    [menus]
+  );
+
+  const isAllSelectedOnPage =
+    currentPageIds.length > 0 && currentPageIds.every((id: number) => selectedIds.includes(id));
+
+  const handleToggleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...currentPageIds])));
+    } else {
+      setSelectedIds((prev) => prev.filter((id) => !currentPageIds.includes(id)));
+    }
+  };
+
+  const handleToggleRow = (id: number, checked: boolean) => {
+    setSelectedIds((prev) => (checked ? [...prev, id] : prev.filter((x) => x !== id)));
+  };
+
+  const handleBulkDelete = () => {
+    startBulkDelete(async () => {
+      const result = await deleteManyMenu(selectedIds);
+      if (result.status === "success") {
+        toast.success(`${selectedIds.length} tagihan berhasil dihapus`);
+        setSelectedIds([]);
+        setShowBulkDeleteDialog(false);
+        refetch();
+      } else {
+        toast.error("Gagal menghapus data", { description: result.message });
+      }
+    });
+  };
+  // ────────────────────────────────────────────────────────────────────────
+
   const filteredData = useMemo(() => {
     return (menus?.data || []).map((item: any, index: number) => [
+      // FIX: kolom checkbox pilih baris, ditaruh paling depan
+      <Checkbox
+        key={`select-${item.id_mastertagihan}`}
+        checked={selectedIds.includes(item.id_mastertagihan)}
+        onCheckedChange={(checked) => handleToggleRow(item.id_mastertagihan, !!checked)}
+        aria-label={`Pilih ${item.namatagihan}`}
+      />,
       currentLimit * (currentPage - 1) + index + 1,
       <p key={`nama-${item.id_mastertagihan}`} className="font-semibold">
         {item.namatagihan}
@@ -164,7 +222,22 @@ export default function MenuManagement() {
         ]}
       />,
     ]);
-  }, [menus, currentLimit, currentPage]);
+  }, [menus, currentLimit, currentPage, selectedIds]);
+
+  // FIX: header tabel juga ditambah 1 kolom checkbox "pilih semua" di depan,
+  // biar posisinya pas sama kolom checkbox di tiap baris
+  const tableHeader = useMemo(
+    () => [
+      <Checkbox
+        key="select-all-header"
+        checked={isAllSelectedOnPage}
+        onCheckedChange={(checked) => handleToggleSelectAll(!!checked)}
+        aria-label="Pilih semua"
+      />,
+      ...HEADER_TABLE_MENU,
+    ],
+    [isAllSelectedOnPage, currentPageIds]
+  ) as unknown as string[];
 
   const totalPages = useMemo(() => {
     return menus?.count ? Math.ceil(menus.count / currentLimit) : 0;
@@ -221,8 +294,31 @@ export default function MenuManagement() {
           </Dialog>
         </div>
       </div>
+
+      {/* FIX: bar aksi massal, cuma muncul kalau ada baris yang dipilih */}
+      {selectedIds.length > 0 && (
+        <div className="flex items-center justify-between bg-muted/50 border rounded-lg px-4 py-2 mb-3">
+          <p className="text-sm">
+            <span className="font-semibold">{selectedIds.length}</span> tagihan dipilih
+          </p>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setSelectedIds([])}>
+              Batal
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setShowBulkDeleteDialog(true)}
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Hapus Terpilih
+            </Button>
+          </div>
+        </div>
+      )}
+
       <DataTable
-        header={HEADER_TABLE_MENU}
+        header={tableHeader}
         data={filteredData}
         isLoading={isLoading}
         totalPages={totalPages}
@@ -243,6 +339,36 @@ export default function MenuManagement() {
         currentData={selectedAction?.data}
         handleChangeAction={handleChangeAction}
       />
+
+      {/* FIX: dialog konfirmasi hapus massal */}
+      <Dialog open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Hapus {selectedIds.length} Tagihan?</DialogTitle>
+            <DialogDescription>
+              Tindakan ini akan menghapus {selectedIds.length} master tagihan yang dipilih,
+              beserta seluruh tagihan siswa, pembayaran, dan data terkait lainnya secara
+              permanen. Tindakan ini tidak dapat dibatalkan.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowBulkDeleteDialog(false)}
+              disabled={isBulkDeleting}
+            >
+              Batal
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleBulkDelete}
+              disabled={isBulkDeleting}
+            >
+              {isBulkDeleting ? "Menghapus..." : "Ya, Hapus Semua"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
