@@ -1,4 +1,3 @@
-// src/validations/auth-validation.ts
 import z from "zod";
 
 export const loginSchemaForm = z.object({
@@ -42,7 +41,7 @@ export const createUserSchema = z.object({
 });
 
 export const updateUserSchema = z.object({
-  wali_auth_id_baru: z.string().optional(), // ← baru: diisi kalau bendahara pilih "pindah wali" di form Edit
+  wali_auth_id_baru: z.string().optional(), // ← diisi kalau bendahara pilih "pindah wali" di form Edit
   nama_siswa: z.string().min(1, "Nama siswa wajib diisi"),
   NIS: z.string().min(1, "NIS wajib diisi"),
   jenis_kelamin: z.enum(["Laki-laki", "Perempuan"], { message: "Jenis kelamin wajib dipilih" }),
@@ -58,6 +57,38 @@ export const updateUserSchema = z.object({
   role: z.string().default("siswa"),
 });
 
+// ── BARU: skema khusus Impor Excel massal ──────────────────────────────────
+// Data sekolah yang diimpor massal sering belum lengkap (terutama Jenis
+// Kelamin & No WA wali). Field itu dibuat OPSIONAL di sini supaya baris
+// tetap bisa masuk sistem (ditandai perlu dilengkapi nanti), bukan ditolak
+// total seperti kalau pakai createUserSchema yang strict (dipakai form
+// Tambah Siswa manual, sengaja dibiarkan strict di sana).
+// Field kritikal (Nama, NIS, Kelas, Angkatan, Nama Wali) tetap wajib,
+// karena dipakai utk identifikasi, billing, & generate akun wali.
+export const importUserSchema = z.object({
+  email: z.string().optional(),
+  password: z.string().optional(),
+  nama_siswa: z.string().min(1, "Nama siswa wajib diisi"),
+  NIS: z.string().min(1, "NIS wajib diisi"),
+  jenis_kelamin: z.enum(["Laki-laki", "Perempuan"]).optional(),
+  kelas: z.string().min(1, "Kelas wajib diisi"),
+  angkatan: z.string().min(1, "Angkatan wajib diisi"),
+  nama_wali: z.string().min(1, "Nama wali wajib diisi (dipakai untuk generate akun login)"),
+  no_wa: z.string().optional(),
+  tempat_lahir: z.string().optional(),
+  tanggal_lahir: z.string().optional(),
+  alamat: z.string().optional(),
+  tipe_spp: z.enum(["reguler", "subsidi"]).default("reguler"),
+  role: z.string().default("siswa"),
+}).superRefine((data, ctx) => {
+  if (!data.email || !z.string().email().safeParse(data.email).success) {
+    ctx.addIssue({ path: ["email"], code: z.ZodIssueCode.custom, message: "Email tidak valid" });
+  }
+  if (!data.password || data.password.length < 6) {
+    ctx.addIssue({ path: ["password"], code: z.ZodIssueCode.custom, message: "Password minimal 6 karakter" });
+  }
+});
+
 export type LoginForm = z.infer<typeof loginSchemaForm>;
 // FIX: pakai z.input (bukan z.infer/z.output) — field yang punya .default()
 // seperti `tipe_spp` dan `role` jadi tetap OPSIONAL di tipe form, sesuai
@@ -67,3 +98,4 @@ export type LoginForm = z.infer<typeof loginSchemaForm>;
 // itu penyebab error TS "Resolver<...> is not assignable to..." kemarin.
 export type CreateUserForm = z.input<typeof createUserSchema>;
 export type UpdateUserForm = z.input<typeof updateUserSchema>;
+export type ImportUserForm = z.infer<typeof importUserSchema>;

@@ -11,7 +11,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { FileUp, Download, Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { FileUp, Download, Loader2, CheckCircle2, XCircle, RefreshCw } from "lucide-react";
 import { useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
@@ -19,8 +19,8 @@ import { importUsersBulk, ImportResult } from "../actions";
 
 const TEMPLATE_HEADERS = [
   "Nama Siswa", "NIS", "Jenis Kelamin", "Kelas", "Angkatan",
-  "Nama Wali", "No WA", "Email", "Password", "Tempat Lahir",
-  "Tanggal Lahir", "Alamat", "Tipe SPP",
+  "Nama Wali", "No WA", "Email (Opsional)", "Password (Opsional)",
+  "Tempat Lahir", "Tanggal Lahir", "Alamat", "Tipe SPP",
 ];
 
 const TEMPLATE_EXAMPLE = {
@@ -31,8 +31,8 @@ const TEMPLATE_EXAMPLE = {
   "Angkatan": "2024",
   "Nama Wali": "Contoh: Siti Aminah",
   "No WA": "08123456789",
-  "Email": "wali.budi@example.com",
-  "Password": "min6karakter",
+  "Email (Opsional)": "",
+  "Password (Opsional)": "",
   "Tempat Lahir": "Surabaya",
   "Tanggal Lahir": "2020-05-10",
   "Alamat": "Jl. Contoh No. 1",
@@ -101,8 +101,8 @@ export default function DialogImportUser({ refetch }: { refetch: () => void }) {
         angkatan: String(r["Angkatan"] || ""),
         nama_wali: r["Nama Wali"] || "",
         no_wa: String(r["No WA"] || ""),
-        email: r["Email"] || "",
-        password: r["Password"] ? String(r["Password"]) : undefined,
+        email: r["Email (Opsional)"] ? String(r["Email (Opsional)"]).trim() : undefined,
+        password: r["Password (Opsional)"] ? String(r["Password (Opsional)"]).trim() : undefined,
         tempat_lahir: r["Tempat Lahir"] || "",
         tanggal_lahir: r["Tanggal Lahir"] || "",
         alamat: r["Alamat"] || undefined,
@@ -113,7 +113,7 @@ export default function DialogImportUser({ refetch }: { refetch: () => void }) {
       setResult(res);
 
       if (res.berhasil > 0) {
-        toast.success(`${res.berhasil} data siswa berhasil diimpor`);
+        toast.success(`${res.berhasil} data siswa berhasil diproses (${res.ditambahkan} baru, ${res.diperbarui} diperbarui)`);
         refetch();
       }
       if (res.gagal > 0) {
@@ -150,7 +150,8 @@ export default function DialogImportUser({ refetch }: { refetch: () => void }) {
         <DialogHeader>
           <DialogTitle>Impor Data Siswa dari Excel</DialogTitle>
           <DialogDescription>
-            Unggah file Excel (.xlsx) sesuai format template untuk menambahkan banyak siswa sekaligus.
+            Unggah file Excel (.xlsx) sesuai format template. NIS yang sudah terdaftar akan diperbarui,
+            NIS baru akan didaftarkan sebagai siswa baru.
           </DialogDescription>
         </DialogHeader>
 
@@ -168,21 +169,40 @@ export default function DialogImportUser({ refetch }: { refetch: () => void }) {
                 {fileName} — {preview.length} baris data siap diimpor
               </p>
               <p className="text-muted-foreground text-xs">
-                Pastikan kolom Email unik dan belum pernah digunakan sebelumnya.
+                NIS yang sudah terdaftar akan otomatis di-<strong>update</strong> (data akademik saja,
+                akun wali tidak diubah). NIS baru akan dibuatkan akun baru — Email/Password yang
+                dikosongkan akan digenerate otomatis dari Nama Wali dan NIS.
               </p>
             </div>
           )}
 
           {result && (
             <div className="space-y-2">
-              <div className="flex gap-4 text-sm">
+              <div className="flex gap-4 text-sm flex-wrap">
                 <span className="flex items-center gap-1 text-green-600">
-                  <CheckCircle2 className="w-4 h-4" /> {result.berhasil} berhasil
+                  <CheckCircle2 className="w-4 h-4" /> {result.ditambahkan} siswa baru
+                </span>
+                <span className="flex items-center gap-1 text-blue-600">
+                  <RefreshCw className="w-4 h-4" /> {result.diperbarui} diperbarui
                 </span>
                 <span className="flex items-center gap-1 text-red-600">
                   <XCircle className="w-4 h-4" /> {result.gagal} gagal
                 </span>
               </div>
+
+              {result.akunDigenerate.length > 0 && (
+                <div className="border rounded-md max-h-48 overflow-y-auto text-xs divide-y">
+                  <p className="p-2 font-medium bg-muted/50 sticky top-0">
+                    Akun baru yang digenerate (catat untuk diberikan ke wali):
+                  </p>
+                  {result.akunDigenerate.map((d, i) => (
+                    <div key={i} className="p-2">
+                      <span className="font-medium">{d.nama}:</span> {d.email} / {d.password}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {result.detailGagal.length > 0 && (
                 <div className="border rounded-md max-h-48 overflow-y-auto text-xs divide-y">
                   {result.detailGagal.map((d, i) => (
