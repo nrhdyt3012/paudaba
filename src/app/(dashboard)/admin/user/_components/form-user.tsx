@@ -303,10 +303,10 @@ const handleGantiMode = (newMode: "baru" | "existing") => {
       label={
         mode === "existing"
           ? "Email Login Wali (otomatis, mengikuti akun yang dipilih)"
-          : "Email (Opsional — untuk login wali)"
+          : "Email Wali"
       }
       placeholder={
-        mode === "existing" ? "email@example.com" : "Kosongkan untuk generate otomatis dari nama wali"
+        mode === "existing" ? "email@example.com" : "Email Wali"
       }
       type="email"
       disabled={mode === "existing"}
@@ -316,13 +316,13 @@ const handleGantiMode = (newMode: "baru" | "existing") => {
         <FormInput
           form={form}
           name={"password" as Path<T>}
-          label="Password (Opsional)"
-          placeholder="Kosongkan untuk generate otomatis dari NIS"
+          label="Password"
+          placeholder="Password Wali (minimal 6 karakter)"
           type="password"
         />
         <p className="text-xs text-muted-foreground -mt-2">
-          Email & password boleh dikosongkan — sistem akan membuatkan otomatis dari Nama Wali
-          dan NIS siswa. Detail akun akan ditampilkan setelah data tersimpan.
+          Email & password boleh dikosongkan — sistem akan membuatkan otomatis email dari Nama Wali
+          dan password dari NIS siswa. Detail akun akan ditampilkan setelah data tersimpan.
         </p>
       </>
     )}
