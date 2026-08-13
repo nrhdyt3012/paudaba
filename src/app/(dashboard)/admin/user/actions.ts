@@ -503,10 +503,21 @@ export type ImportResult = {
 // ── Tipe untuk hasil Preview (simulasi, belum menulis apa pun ke DB) ──────────
 export type ImportPlanRow = {
   baris: number;
-  nama: string;
-  nis: string;
   aksi: "TAMBAH" | "PERBARUI" | "GAGAL";
   keterangan: string;
+  // ── data akademik, ditampilkan sebagai kolom tabel preview ────────────────
+  nis: string;
+  nama_siswa: string;
+  jenis_kelamin: string;
+  tempat_lahir: string;
+  tanggal_lahir: string;
+  nama_wali: string;
+  no_wa: string;
+  alamat: string;
+  kelas: string;
+  angkatan: string;
+  tipe_spp: string;
+  // ── akun (hanya terisi kalau aksi = TAMBAH) ────────────────────────────────
   email?: string;
   password?: string;
   pesan?: string;
@@ -590,13 +601,28 @@ export async function previewImportUsersBulk(rows: ImportRow[]): Promise<ImportP
     const baris = i + 2; // baris 1 = header Excel
     const nis = String(row.NIS || "").trim();
 
+    // Data akademik dasar yang dipakai untuk kolom tabel preview,
+    // sama untuk aksi TAMBAH maupun PERBARUI.
+    const dataDasar = {
+      nis,
+      nama_siswa: row.nama_siswa || "-",
+      jenis_kelamin: row.jenis_kelamin || "-",
+      tempat_lahir: row.tempat_lahir || "-",
+      tanggal_lahir: row.tanggal_lahir || "-",
+      nama_wali: row.nama_wali || "-",
+      no_wa: row.no_wa || "-",
+      alamat: row.alamat || "-",
+      kelas: row.kelas || "-",
+      angkatan: row.angkatan || "-",
+      tipe_spp: row.tipe_spp?.toLowerCase() === "subsidi" ? "subsidi" : "reguler",
+    };
+
     if (nis && nisAda.has(nis)) {
       plan.rows.push({
         baris,
-        nama: row.nama_siswa || "-",
-        nis,
         aksi: "PERBARUI",
         keterangan: "NIS sudah terdaftar — data akademik diperbarui, akun wali tidak disentuh",
+        ...dataDasar,
       });
       plan.akanDiperbarui++;
       continue;
@@ -630,11 +656,10 @@ export async function previewImportUsersBulk(rows: ImportRow[]): Promise<ImportP
       const msgs = Object.values(validated.error.flatten().fieldErrors).flat().join(", ");
       plan.rows.push({
         baris,
-        nama: row.nama_siswa || "-",
-        nis,
         aksi: "GAGAL",
         keterangan: "Data tidak valid",
         pesan: msgs || "Data tidak valid",
+        ...dataDasar,
       });
       plan.akanGagal++;
       continue;
@@ -643,14 +668,13 @@ export async function previewImportUsersBulk(rows: ImportRow[]): Promise<ImportP
     const gabungAkunLama = emailSudahAda.has(group.email!);
     plan.rows.push({
       baris,
-      nama: row.nama_siswa || "-",
-      nis,
       aksi: "TAMBAH",
       keterangan: gabungAkunLama
         ? "Siswa baru — digabung ke akun wali yang sudah ada"
         : "Siswa baru — akun wali baru akan dibuat",
       email: group.email,
       password: gabungAkunLama ? undefined : group.password,
+      ...dataDasar,
     });
     plan.akanDitambahkan++;
   }

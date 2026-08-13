@@ -45,6 +45,20 @@ const TEMPLATE_EXAMPLE = {
   "Tipe SPP": "reguler",
 };
 
+// ── Badge kecil untuk kolom Aksi di tabel preview ────────────────────────────
+function BadgeAksi({ aksi }: { aksi: "TAMBAH" | "PERBARUI" | "GAGAL" }) {
+  const styleMap = {
+    TAMBAH: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
+    PERBARUI: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100",
+    GAGAL: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100",
+  };
+  return (
+    <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium whitespace-nowrap ${styleMap[aksi]}`}>
+      {aksi}
+    </span>
+  );
+}
+
 export default function DialogImportUser({ refetch }: { refetch: () => void }) {
   const [open, setOpen] = useState(false);
   const [isPreviewing, setIsPreviewing] = useState(false);
@@ -171,7 +185,8 @@ export default function DialogImportUser({ refetch }: { refetch: () => void }) {
           Impor Excel
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[650px] max-h-[90vh] flex flex-col">
+      {/* Preview berupa tabel lebar, jadi dialog dilebarkan khusus saat plan sudah ada */}
+      <DialogContent className={`${plan && !result ? "sm:max-w-[95vw] lg:max-w-[1100px]" : "sm:max-w-[650px]"} max-h-[90vh] flex flex-col`}>
         <DialogHeader>
           <DialogTitle>Impor Data Siswa dari Excel</DialogTitle>
           <DialogDescription>
@@ -206,7 +221,7 @@ export default function DialogImportUser({ refetch }: { refetch: () => void }) {
             </>
           )}
 
-          {/* ── Tampilan Preview (belum menulis apa pun ke DB) ─────────────────── */}
+          {/* ── Tampilan Preview: tabel (belum menulis apa pun ke DB) ──────────── */}
           {plan && !result && (
             <div className="space-y-2">
               <div className="flex gap-4 text-sm flex-wrap">
@@ -221,33 +236,60 @@ export default function DialogImportUser({ refetch }: { refetch: () => void }) {
                 </span>
               </div>
 
-              <div className="border rounded-md max-h-64 overflow-y-auto text-xs divide-y">
-                {plan.rows.map((r, i) => (
-                  <div key={i} className="p-2">
-                    <span className="font-medium">
-                      Baris {r.baris} ({r.nama}):
-                    </span>{" "}
-                    <span
-                      className={
-                        r.aksi === "TAMBAH"
-                          ? "text-green-600"
-                          : r.aksi === "PERBARUI"
-                          ? "text-blue-600"
-                          : "text-red-600"
-                      }
-                    >
-                      {r.aksi}
-                    </span>
-                    {" — "}
-                    {r.keterangan}
-                    {r.email && (
-                      <div className="text-muted-foreground">
-                        Akun: {r.email} / {r.password ?? "(pakai akun lama)"}
-                      </div>
-                    )}
-                    {r.pesan && <div className="text-red-600">{r.pesan}</div>}
-                  </div>
-                ))}
+              <div className="border rounded-md overflow-auto max-h-[55vh]">
+                <table className="text-xs w-full border-collapse">
+                  <thead className="bg-muted/70 sticky top-0 z-10">
+                    <tr>
+                      <th className="p-2 text-left font-medium whitespace-nowrap">Baris</th>
+                      <th className="p-2 text-left font-medium whitespace-nowrap">Aksi</th>
+                      <th className="p-2 text-left font-medium whitespace-nowrap">NIS</th>
+                      <th className="p-2 text-left font-medium whitespace-nowrap">Nama Siswa</th>
+                      <th className="p-2 text-left font-medium whitespace-nowrap">Jenis Kelamin</th>
+                      <th className="p-2 text-left font-medium whitespace-nowrap">Tempat Lahir</th>
+                      <th className="p-2 text-left font-medium whitespace-nowrap">Tanggal Lahir</th>
+                      <th className="p-2 text-left font-medium whitespace-nowrap">Nama Wali</th>
+                      <th className="p-2 text-left font-medium whitespace-nowrap">No WA Wali</th>
+                      <th className="p-2 text-left font-medium whitespace-nowrap">Alamat</th>
+                      <th className="p-2 text-left font-medium whitespace-nowrap">Kelas</th>
+                      <th className="p-2 text-left font-medium whitespace-nowrap">Angkatan</th>
+                      <th className="p-2 text-left font-medium whitespace-nowrap">Tipe SPP</th>
+                      <th className="p-2 text-left font-medium whitespace-nowrap">Email</th>
+                      <th className="p-2 text-left font-medium whitespace-nowrap">Password</th>
+                      <th className="p-2 text-left font-medium whitespace-nowrap">Keterangan</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {plan.rows.map((r, i) => (
+                      <tr
+                        key={i}
+                        className={r.aksi === "GAGAL" ? "bg-red-50 dark:bg-red-950/20" : undefined}
+                      >
+                        <td className="p-2 whitespace-nowrap text-muted-foreground">{r.baris}</td>
+                        <td className="p-2 whitespace-nowrap"><BadgeAksi aksi={r.aksi} /></td>
+                        <td className="p-2 whitespace-nowrap font-mono">{r.nis}</td>
+                        <td className="p-2 whitespace-nowrap">{r.nama_siswa}</td>
+                        <td className="p-2 whitespace-nowrap">{r.jenis_kelamin}</td>
+                        <td className="p-2 whitespace-nowrap">{r.tempat_lahir}</td>
+                        <td className="p-2 whitespace-nowrap">{r.tanggal_lahir}</td>
+                        <td className="p-2 whitespace-nowrap">{r.nama_wali}</td>
+                        <td className="p-2 whitespace-nowrap">{r.no_wa}</td>
+                        <td className="p-2 max-w-[150px] truncate" title={r.alamat}>{r.alamat}</td>
+                        <td className="p-2 whitespace-nowrap">{r.kelas}</td>
+                        <td className="p-2 whitespace-nowrap">{r.angkatan}</td>
+                        <td className="p-2 whitespace-nowrap capitalize">{r.tipe_spp}</td>
+                        <td className="p-2 whitespace-nowrap">{r.email || "-"}</td>
+                        <td className="p-2 whitespace-nowrap">{r.password || "(pakai akun lama)"}</td>
+                        <td className="p-2 min-w-[200px]">
+                          {r.pesan ? (
+                            <span className="text-red-600">{r.pesan}</span>
+                          ) : (
+                            <span className="text-muted-foreground">{r.keterangan}</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
 
               {plan.akanGagal > 0 && (
