@@ -12,6 +12,7 @@ export const HEADER_TABLE_USER = [
   "Alamat",
   "Kelas",
   "Angkatan",
+  "Status",
   "Tipe SPP",
   "Action",
 ];

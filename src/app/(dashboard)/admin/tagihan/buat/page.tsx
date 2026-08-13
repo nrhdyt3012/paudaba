@@ -170,6 +170,7 @@ export default function BuatTagihanPage() {
         .from("siswa")
         .select("id, namasiswa, kelas, nis, tipe_spp")
         .eq("is_active", true)
+        .eq("status", "aktif")   // BARU: siswa yang sudah lulus/tidak aktif tidak ikut ditagih
         .order("kelas").order("namasiswa");
       if (filterKelas !== "semua") q = q.eq("kelas", filterKelas);
       if (filterTipeSPP !== "semua") q = q.eq("tipe_spp", filterTipeSPP);

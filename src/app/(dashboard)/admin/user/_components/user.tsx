@@ -42,6 +42,14 @@ const JENIS_KELAMIN_FILTER_OPTIONS = [
   { value: "perempuan", label: "Perempuan" },
 ];
 
+// BARU: filter status akademik (aktif / tidak aktif), pola sama dengan
+// filter Kelas & Jenis Kelamin lainnya.
+const STATUS_FILTER_OPTIONS = [
+  { value: "semua", label: "Semua Status" },
+  { value: "aktif", label: "Aktif" },
+  { value: "tidak aktif", label: "Tidak Aktif" },
+];
+
 const SORT_OPTIONS = [
   { value: "terbaru", label: "Terbaru Ditambahkan" },
   { value: "nis", label: "NIS (Kecil → Besar)" },
@@ -85,12 +93,14 @@ export default function UserManagement() {
 
   const [filterKelas, setFilterKelas] = useState("semua");
   const [filterJenisKelamin, setFilterJenisKelamin] = useState("semua");
+  // BARU: state filter status akademik
+  const [filterStatus, setFilterStatus] = useState("semua");
   const [sortBy, setSortBy] = useState("terbaru");
 
   // FIX: query sekarang ambil SEMUA baris yang cocok search+kelas (tanpa
-  // `.range()` server-side) — karena filter Jenis Kelamin & sortir NIS/Nama
-  // dilakukan di client (lihat alasan di helper isLakiLaki/isPerempuan di
-  // atas), jadi pagination juga digeser jadi di client supaya hasilnya
+  // `.range()` server-side) — karena filter Jenis Kelamin, Status & sortir
+  // NIS/Nama dilakukan di client (lihat alasan di helper isLakiLaki/isPerempuan
+  // di atas), jadi pagination juga digeser jadi di client supaya hasilnya
   // tetap akurat & konsisten.
   const { data: users, isLoading, refetch } = useQuery({
     queryKey: ["siswa-list", currentSearch, filterKelas],
@@ -123,8 +133,8 @@ export default function UserManagement() {
     if (!open) setSelectedAction(null);
   };
 
-  // FIX: filter Jenis Kelamin + sortir (NIS naik / Nama A-Z / terbaru)
-  // diterapkan di sini, sebelum data dipotong per halaman.
+  // FIX: filter Jenis Kelamin, Status akademik + sortir (NIS naik / Nama A-Z
+  // / terbaru) diterapkan di sini, sebelum data dipotong per halaman.
   const filteredSorted = useMemo(() => {
     let rows = users?.data || [];
 
@@ -132,6 +142,12 @@ export default function UserManagement() {
       rows = rows.filter((r: any) => isLakiLaki(r.jeniskelamin));
     } else if (filterJenisKelamin === "perempuan") {
       rows = rows.filter((r: any) => isPerempuan(r.jeniskelamin));
+    }
+
+    // BARU: filter status akademik — default ke "aktif" kalau kolom status
+    // kosong (konsisten dengan default DB `status` = 'aktif').
+    if (filterStatus !== "semua") {
+      rows = rows.filter((r: any) => (r.status || "aktif") === filterStatus);
     }
 
     rows = [...rows].sort((a: any, b: any) => {
@@ -155,32 +171,33 @@ export default function UserManagement() {
     });
 
     return rows;
-  }, [users, filterJenisKelamin, sortBy]);
+  }, [users, filterJenisKelamin, filterStatus, sortBy]);
 
   const handleExportExcel = () => {
-  const exportData = filteredSorted.map((item: any, index: number) => ({
-    "No": index + 1,
-    "NIS": item.nis || "",
-    "Nama Siswa": item.namasiswa || "",
-    "Jenis Kelamin": item.jeniskelamin || "",
-    "Tempat Lahir": item.tempatlahir || "",
-    "Tanggal Lahir": item.tanggallahir
-      ? new Date(item.tanggallahir).toLocaleDateString("id-ID")
-      : "",
-    "Nama Wali": item.namawali || "",
-    "No WA": item.nowa || "",
-    "Alamat": item.alamat || "",
-    "Kelas": item.kelas || "",
-    "Angkatan": item.angkatan || "",
-    "Tipe SPP": item.tipe_spp || "reguler",
-  }));
+    const exportData = filteredSorted.map((item: any, index: number) => ({
+      "No": index + 1,
+      "NIS": item.nis || "",
+      "Nama Siswa": item.namasiswa || "",
+      "Jenis Kelamin": item.jeniskelamin || "",
+      "Tempat Lahir": item.tempatlahir || "",
+      "Tanggal Lahir": item.tanggallahir
+        ? new Date(item.tanggallahir).toLocaleDateString("id-ID")
+        : "",
+      "Nama Wali": item.namawali || "",
+      "No WA": item.nowa || "",
+      "Alamat": item.alamat || "",
+      "Kelas": item.kelas || "",
+      "Angkatan": item.angkatan || "",
+      "Status": item.status || "aktif",
+      "Tipe SPP": item.tipe_spp || "reguler",
+    }));
 
-  const worksheet = XLSX.utils.json_to_sheet(exportData);
-  worksheet["!cols"] = Object.keys(exportData[0] || {}).map(() => ({ wch: 18 }));
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, "Data Siswa");
-  XLSX.writeFile(workbook, `Data-Siswa-${new Date().toISOString().slice(0, 10)}.xlsx`);
-};
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    worksheet["!cols"] = Object.keys(exportData[0] || {}).map(() => ({ wch: 18 }));
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Data Siswa");
+    XLSX.writeFile(workbook, `Data-Siswa-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
 
   const totalPages = useMemo(
     () => Math.ceil(filteredSorted.length / currentLimit),
@@ -243,6 +260,10 @@ export default function UserManagement() {
   const jumlahBisaDipromosikan = selectedRows.filter((r: any) => kelasBerikutnya(r.kelas)).length;
   const jumlahDilewatiPromosi = selectedRows.length - jumlahBisaDipromosikan;
 
+  // FIX: toast sekarang menampilkan pesan error asli per siswa (pola sama
+  // dengan confirmBulkDelete), supaya kalau ada yang gagal, penyebabnya
+  // kelihatan — sebelumnya cuma toast generik "gagal diubah statusnya"
+  // tanpa detail, jadi susah didiagnosis.
   const confirmBulkStatus = (statusBaru: "aktif" | "tidak aktif") => {
     startBulkAction(async () => {
       const results = await Promise.all(
@@ -250,20 +271,25 @@ export default function UserManagement() {
           const formData = new FormData();
           formData.append("id", r.id);
           formData.append("status", statusBaru);
-          return updateStatusSiswa({}, formData);
+          const res = await updateStatusSiswa({}, formData);
+          return { nama: r.namasiswa || "-", res };
         })
       );
 
-      const failedCount = results.filter((res) => res.status === "error").length;
-      const successCount = results.length - failedCount;
+      const gagal = results.filter((r) => r.res.status === "error");
+      const successCount = results.length - gagal.length;
 
       if (successCount > 0) {
         toast.success(
           `${successCount} siswa berhasil ${statusBaru === "aktif" ? "diaktifkan" : "dinonaktifkan"}`
         );
       }
-      if (failedCount > 0) {
-        toast.error(`${failedCount} siswa gagal diubah statusnya`);
+      if (gagal.length > 0) {
+        toast.error(`${gagal.length} siswa gagal diubah statusnya`, {
+          description: gagal
+            .map((g) => `${g.nama}: ${g.res.errors?._form?.[0] || "gagal"}`)
+            .join(" | "),
+        });
       }
 
       setSelectedIds([]);
@@ -383,24 +409,28 @@ export default function UserManagement() {
       </span>,
 
       // Kelas
-      // FIX: kalau status akademik siswa "tidak aktif", tampilkan penanda
-      // kecil di sebelah badge Kelas — BUKAN mengembalikan kolom Status
-      // yang sudah sengaja dihapus (itu soal is_active/login, sudah
-      // dipindah ke Kelola Akun). Ini murni indikator visual status
-      // akademik per-anak biar efek "Nonaktifkan Terpilih" kelihatan.
-      <div key={`kelas-${item.id}`} className="flex items-center gap-1.5">
+      <div key={`kelas-${item.id}`}>
         <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100">
           {item.kelas || "-"}
         </span>
-        {item.status === "tidak aktif" && (
-          <span className="px-2 py-0.5 rounded-full text-[10px] bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
-            Nonaktif
-          </span>
-        )}
       </div>,
 
       // Angkatan
       item.angkatan || "-",
+
+      // BARU: kolom Status akademik berdiri sendiri (dulu cuma badge kecil
+      // nempel di kolom Kelas — sekarang dipisah + bisa difilter lewat
+      // dropdown Status di atas tabel).
+      <span
+        key={`status-${item.id}`}
+        className={`px-2 py-1 rounded-full text-xs font-medium ${
+          (item.status || "aktif") === "tidak aktif"
+            ? "bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+            : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100"
+        }`}
+      >
+        {item.status || "aktif"}
+      </span>,
 
       // Tipe SPP
       <span
@@ -506,6 +536,18 @@ export default function UserManagement() {
               ))}
             </SelectContent>
           </Select>
+          {/* BARU: dropdown filter Status akademik (aktif / tidak aktif) */}
+          <Select
+            value={filterStatus}
+            onValueChange={(v) => { setFilterStatus(v); handleChangePage(1); }}
+          >
+            <SelectTrigger className="w-full sm:w-[150px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {STATUS_FILTER_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Select
             value={sortBy}
             onValueChange={(v) => { setSortBy(v); handleChangePage(1); }}
@@ -518,19 +560,19 @@ export default function UserManagement() {
             </SelectContent>
           </Select>
           <Button variant="outline" onClick={handleExportExcel}>
-  <Download className="w-4 h-4 mr-2" />
-  Ekspor Excel
-</Button>
-<DialogImportUser refetch={refetch} />
-<Dialog>
-  <DialogTrigger asChild>
-    <Button className="bg-green-600 hover:bg-green-700">
-      <Plus className="w-4 h-4 mr-2" />
-      Tambah
-    </Button>
-  </DialogTrigger>
-  <DialogCreateUser refetch={refetch} />
-</Dialog>
+            <Download className="w-4 h-4 mr-2" />
+            Ekspor Excel
+          </Button>
+          <DialogImportUser refetch={refetch} />
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button className="bg-green-600 hover:bg-green-700">
+                <Plus className="w-4 h-4 mr-2" />
+                Tambah
+              </Button>
+            </DialogTrigger>
+            <DialogCreateUser refetch={refetch} />
+          </Dialog>
         </div>
       </div>
 
