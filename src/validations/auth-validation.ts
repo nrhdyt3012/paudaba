@@ -24,13 +24,16 @@ export const createUserSchema = z.object({
   tipe_spp: z.enum(["reguler", "subsidi"]).default("reguler"),
   role: z.string().default("siswa"),
 }).superRefine((data, ctx) => {
-  // Email & password HANYA wajib kalau bikin wali baru.
-  // Kalau nyambung ke wali yang sudah ada, wali_auth_id yang wajib.
+  // ── BARU: Email & password untuk wali baru sekarang OPSIONAL —
+  // kalau dikosongkan, server akan generate otomatis (email dari slug
+  // Nama Wali, password dari NIS). Kalau DIISI manual, tetap divalidasi
+  // formatnya supaya tidak ada email asal-asalan / password terlalu pendek
+  // yang lolos ke Supabase Auth.
   if (data.mode === "baru") {
-    if (!data.email || !z.string().email().safeParse(data.email).success) {
-      ctx.addIssue({ path: ["email"], code: z.ZodIssueCode.custom, message: "Email wajib diisi dengan format valid" });
+    if (data.email && !z.string().email().safeParse(data.email).success) {
+      ctx.addIssue({ path: ["email"], code: z.ZodIssueCode.custom, message: "Format email tidak valid" });
     }
-    if (!data.password || data.password.length < 6) {
+    if (data.password && data.password.length < 6) {
       ctx.addIssue({ path: ["password"], code: z.ZodIssueCode.custom, message: "Password minimal 6 karakter" });
     }
   } else {
@@ -57,7 +60,7 @@ export const updateUserSchema = z.object({
   role: z.string().default("siswa"),
 });
 
-// ── BARU: skema khusus Impor Excel massal ──────────────────────────────────
+// ── Skema khusus Impor Excel massal ─────────────────────────────────────────
 // Data sekolah yang diimpor massal sering belum lengkap (terutama Jenis
 // Kelamin & No WA wali). Field itu dibuat OPSIONAL di sini supaya baris
 // tetap bisa masuk sistem (ditandai perlu dilengkapi nanti), bukan ditolak

@@ -43,6 +43,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { fetchPengaturanSekolah } from "@/lib/pengaturan-sekolah";
 import { toast } from "sonner";
 import { useAuthStore } from "@/stores/auth-store";
 import { cn } from "@/lib/utils";
@@ -129,6 +130,17 @@ export default function AppSidebar() {
   const isKepalaSekolah = profile?.role === "kepala_sekolah";
   const isSiswa = profile?.role === "siswa";
 
+  // Logo & nama sekolah di header sidebar sekarang dinamis dari
+  // pengaturan_sekolah — queryKey sama dengan EditProfilSekolahDialog
+  // supaya begitu Superadmin simpan perubahan, sidebar ikut ter-refresh
+  // otomatis lewat cache React Query yang sama (tanpa reload halaman).
+  const { data: pengaturanSekolah } = useQuery({
+    queryKey: ["pengaturan-sekolah"],
+    queryFn: fetchPengaturanSekolah,
+  });
+  const namaSekolahDisplay = pengaturanSekolah?.nama_sekolah || "KB/TK ABA 1 BUDURAN";
+  const logoSekolahDisplay = pengaturanSekolah?.logo_url || "/logo.jpg";
+
   // FIX (fitur lupa password): badge jumlah permintaan reset password yang
   // masih pending, ditampilkan di menu "Kelola Akun". Polling 15 detik —
   // cukup untuk kebutuhan ini tanpa perlu Supabase Realtime.
@@ -181,14 +193,14 @@ export default function AppSidebar() {
                 >
                   <div className="flex items-center gap-3">
                     <Image
-                      src="/logo.jpg"
-                      alt="Logo"
+                      src={logoSekolahDisplay}
+                      alt={namaSekolahDisplay}
                       width={32}
                       height={32}
-                      className="rounded-full"
+                      className="rounded-full object-cover"
                     />
                     <div className="grid flex-1 text-left text-sm leading-tight">
-                      <span className="font-semibold truncate">KB/TK ABA 1 BUDURAN</span>
+                      <span className="font-semibold truncate">{namaSekolahDisplay}</span>
                     </div>
                   </div>
                 </Link>

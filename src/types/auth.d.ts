@@ -20,6 +20,12 @@ export type AuthFormState = {
     profile?: any;
     redirectUrl?: string;
   };
+  // ── BARU: diisi kalau createUser() men-generate email/password otomatis
+  // (mode wali baru, field email/password dikosongkan di form). Bendahara
+  // perlu melihat ini untuk dicatat & diberikan ke wali. null/undefined
+  // berarti tidak ada akun yang digenerate (mis. email/password diisi
+  // manual, atau mode "existing").
+  akunDigenerate?: { email: string; password: string } | null;
 };
 
 export type SiswaChild = {
@@ -54,4 +60,3 @@ export type Profile = {
   tempat_lahir?: string;
   tanggal_lahir?: string;
 };
-

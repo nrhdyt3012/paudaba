@@ -43,9 +43,9 @@ export default function DashboardShared() {
   const currentYear = new Date().getFullYear();
   const { angkatan } = useAngkatanFilterStore();
   const profile = useAuthStore((state) => state.profile);
-  // Kepala Sekolah: read-only — tidak boleh mengubah profil sekolah,
-  // cuma memantau/melihat.
-  const isKepalaSekolah = profile?.role === "kepala_sekolah";
+  // Edit Profil Sekolah cuma untuk Superadmin — Bendahara dan Kepala
+  // Sekolah sama-sama tidak boleh mengubah pengaturan sekolah.
+  const isSuperadmin = profile?.role === "superadmin";
 
   const [showTunggakanDialog, setShowTunggakanDialog] = useState(false);
   const [searchTunggakan, setSearchTunggakan] = useState("");
@@ -244,7 +244,7 @@ export default function DashboardShared() {
       KB/TK Aisyiyah Bustanul Athfal 1 Buduran
     </p>
   </div>
-  {!isKepalaSekolah && (
+  {isSuperadmin && (
     <Button
       variant="outline"
       size="sm"

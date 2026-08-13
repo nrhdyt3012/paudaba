@@ -34,7 +34,19 @@ export default function DialogCreateUser({ refetch }: { refetch: () => void }) {
       });
     }
     if (state?.status === "success") {
-      toast.success("Data siswa berhasil ditambahkan");
+      // ── BARU: kalau email/password digenerate otomatis (wali baru
+      // tanpa isi email/password manual), tampilkan ke bendahara supaya
+      // bisa dicatat & diberikan ke wali. Durasi toast dipanjangkan
+      // karena isinya penting untuk disalin.
+      if (state.akunDigenerate) {
+        toast.success("Data siswa berhasil ditambahkan", {
+          description: `Akun wali otomatis dibuat — Email: ${state.akunDigenerate.email} / Password: ${state.akunDigenerate.password}`,
+          duration: 15000,
+        });
+      } else {
+        toast.success("Data siswa berhasil ditambahkan");
+      }
+
       form.reset();
       document
         .querySelector<HTMLButtonElement>('[data-state="open"]')

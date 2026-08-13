@@ -23,6 +23,7 @@ export const INITIAL_CREATE_USER_FORM = {
 export const INITIAL_STATE_CREATE_USER = {
   status: "idle",
   errors: { _form: [] as string[] },
+  akunDigenerate: null as { email: string; password: string } | null, // ← baru
 };
 
 export const INITIAL_STATE_UPDATE_USER = {

@@ -295,27 +295,39 @@ const handleGantiMode = (newMode: "baru" | "existing") => {
               placeholder="Nama lengkap siswa"
             />
 
-           {type === "Create" && (
-              <>
-                <FormInput
-                  form={form}
-                  name={"email" as Path<T>}
-                  label={mode === "existing" ? "Email Login Wali (otomatis, mengikuti akun yang dipilih)" : "Email (untuk login wali)"}
-                  placeholder="email@example.com"
-                  type="email"
-                  disabled={mode === "existing"}
-                />
-                {mode !== "existing" && (
-                  <FormInput
-                    form={form}
-                    name={"password" as Path<T>}
-                    label="Password"
-                    placeholder="Min. 6 karakter"
-                    type="password"
-                  />
-                )}
-              </>
-            )}
+{type === "Create" && (
+  <>
+    <FormInput
+      form={form}
+      name={"email" as Path<T>}
+      label={
+        mode === "existing"
+          ? "Email Login Wali (otomatis, mengikuti akun yang dipilih)"
+          : "Email (Opsional — untuk login wali)"
+      }
+      placeholder={
+        mode === "existing" ? "email@example.com" : "Kosongkan untuk generate otomatis dari nama wali"
+      }
+      type="email"
+      disabled={mode === "existing"}
+    />
+    {mode !== "existing" && (
+      <>
+        <FormInput
+          form={form}
+          name={"password" as Path<T>}
+          label="Password (Opsional)"
+          placeholder="Kosongkan untuk generate otomatis dari NIS"
+          type="password"
+        />
+        <p className="text-xs text-muted-foreground -mt-2">
+          Email & password boleh dikosongkan — sistem akan membuatkan otomatis dari Nama Wali
+          dan NIS siswa. Detail akun akan ditampilkan setelah data tersimpan.
+        </p>
+      </>
+    )}
+  </>
+)}
 
             <div className="grid grid-cols-2 gap-4">
               <FormInput
