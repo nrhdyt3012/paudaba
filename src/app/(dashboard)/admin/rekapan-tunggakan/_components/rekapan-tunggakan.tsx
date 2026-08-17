@@ -406,7 +406,6 @@ export default function RekapanTunggakan() {
             {!isKepalaSekolah && (
               <Button
                 onClick={() => router.push("/admin/rekapan-tunggakan/reminder")}
-                disabled={!tunggakanData?.length}
                 size="sm"
                 className="bg-green-600 hover:bg-green-700"
               >
