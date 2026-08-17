@@ -58,7 +58,6 @@ export default function KwitansiTemplate({ data }: { data: KwitansiData }) {
   };
 
   return (
-    // sisanya tidak berubah
     <div className="bg-white text-black" style={{ width: "210mm", minHeight: "148mm", padding: "12mm" }}>
       {/* Header */}
       <div className="flex items-center justify-between border-b-2 border-black pb-3 mb-4">

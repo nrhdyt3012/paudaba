@@ -51,11 +51,16 @@ interface SiswaGroup {
 // FIX: format tanggal-bulan-tahun sesuai permintaan, misal "5 Agustus 2026"
 const formatTanggalReminder = (iso: string | null) => {
   if (!iso) return "-";
-  return new Date(iso).toLocaleDateString("id-ID", {
+  const tanggal = new Date(iso).toLocaleDateString("id-ID", {
     day: "numeric",
     month: "long",
     year: "numeric",
   });
+  const jam = new Date(iso).toLocaleTimeString("id-ID", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return `${tanggal}, ${jam}`;
 };
 
 export default function ReminderTunggakan() {
