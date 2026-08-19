@@ -40,6 +40,11 @@ import KwitansiTemplate, {
   KwitansiData,
   SekolahInfo,
 } from "@/components/common/kwitansi-template";
+// FIX: pakai hook bersama untuk queryKey ["pengaturan-sekolah"] — supaya
+// bentuk datanya (camelCase) sama persis dengan yang dipakai app-sidebar.tsx,
+// tidak ada lagi dua queryFn berbeda yang berebut satu queryKey (penyebab
+// kwitansi kadang nampilin "-" walau data di Supabase sudah benar).
+import { usePengaturanSekolah } from "@/hooks/use-pengaturan-sekolah";
 
 const BULAN_NAMA = [
   "",
@@ -293,34 +298,11 @@ export default function RekapanPembayaran() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // FIX: ambil data profil sekolah (nama, alamat, logo, bendahara, ttd)
-  // dari tabel pengaturan_sekolah, dipakai untuk header/footer kwitansi.
-  // Sesuaikan nama tabel & kolom dengan skema Supabase kamu yang sebenarnya.
-const { data: sekolahInfo } = useQuery({
-  queryKey: ["pengaturan-sekolah"],
-  queryFn: async (): Promise<SekolahInfo | null> => {
-    const { data, error } = await supabase
-      .from("pengaturan_sekolah")
-      .select("nama_sekolah, alamat_sekolah, logo_url, nama_bendahara, tanda_tangan_bendahara_url")
-      .eq("id", 1)
-      .maybeSingle();
-
-    if (error) {
-      toast.error("Gagal memuat data sekolah", { description: error.message });
-      return null;
-    }
-    if (!data) return null;
-
-    return {
-      namaSekolah: data.nama_sekolah,
-      alamatSekolah: data.alamat_sekolah,
-      logoUrl: data.logo_url,
-      namaBendahara: data.nama_bendahara,
-      tandaTanganUrl: data.tanda_tangan_bendahara_url,
-    };
-  },
-  staleTime: 5 * 60 * 1000,
-});
+  // FIX: ambil data profil sekolah lewat hook bersama `usePengaturanSekolah`
+  // (queryKey ["pengaturan-sekolah"], bentuk camelCase) — jangan bikin
+  // useQuery terpisah di sini lagi, supaya tidak collide dengan cache yang
+  // dipakai app-sidebar.tsx dan komponen kwitansi lain.
+  const { data: sekolahInfo } = usePengaturanSekolah();
 
   const { data: pembayaranData, isLoading } = useQuery({
     queryKey: ["rekapan-pembayaran", selectedMonth, selectedYear],

@@ -43,7 +43,10 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { fetchPengaturanSekolah } from "@/lib/pengaturan-sekolah";
+// FIX: ganti import fetchPengaturanSekolah langsung -> pakai hook bersama
+// supaya queryKey ["pengaturan-sekolah"] cuma punya SATU bentuk data
+// (camelCase) di seluruh app, sama seperti yang dipakai kwitansi/laporan.
+import { usePengaturanSekolah } from "@/hooks/use-pengaturan-sekolah";
 import { toast } from "sonner";
 import { useAuthStore } from "@/stores/auth-store";
 import { cn } from "@/lib/utils";
@@ -131,15 +134,15 @@ export default function AppSidebar() {
   const isSiswa = profile?.role === "siswa";
 
   // Logo & nama sekolah di header sidebar sekarang dinamis dari
-  // pengaturan_sekolah — queryKey sama dengan EditProfilSekolahDialog
+  // pengaturan_sekolah — pakai hook bersama `usePengaturanSekolah` yang
+  // queryKey-nya SAMA dengan yang dipakai KwitansiTemplate/LaporanRiwayat,
   // supaya begitu Superadmin simpan perubahan, sidebar ikut ter-refresh
-  // otomatis lewat cache React Query yang sama (tanpa reload halaman).
-  const { data: pengaturanSekolah } = useQuery({
-    queryKey: ["pengaturan-sekolah"],
-    queryFn: fetchPengaturanSekolah,
-  });
-  const namaSekolahDisplay = pengaturanSekolah?.nama_sekolah || "KB/TK ABA 1 BUDURAN";
-  const logoSekolahDisplay = pengaturanSekolah?.logo_url || "/logo.jpg";
+  // otomatis lewat cache React Query yang sama (tanpa reload halaman) —
+  // dan supaya tidak ada dua bentuk data (camelCase vs snake_case) yang
+  // berebut satu queryKey yang sama.
+  const { data: pengaturanSekolah } = usePengaturanSekolah();
+  const namaSekolahDisplay = pengaturanSekolah?.namaSekolah || "KB/TK ABA 1 BUDURAN";
+  const logoSekolahDisplay = pengaturanSekolah?.logoUrl || "/logo.jpg";
 
   // FIX (fitur lupa password): badge jumlah permintaan reset password yang
   // masih pending, ditampilkan di menu "Kelola Akun". Polling 15 detik —

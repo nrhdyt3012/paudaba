@@ -5,6 +5,16 @@
 // Form untuk mengubah profil sekolah yang dipakai di kwitansi & laporan:
 // nama sekolah, alamat, logo, nama bendahara, dan foto tanda tangan bendahara.
 // Semua perubahan disimpan ke tabel `pengaturan_sekolah` di Supabase.
+//
+// FIX: dialog ini butuh field mentah (snake_case, termasuk field yang tidak
+// dipakai di kwitansi seperti default value upload) — jadi sengaja pakai
+// queryKey ["pengaturan-sekolah-raw"] yang TERPISAH dari ["pengaturan-sekolah"]
+// (dipakai app-sidebar.tsx & komponen kwitansi via usePengaturanSekolah()).
+// Sebelumnya dialog ini pakai queryKey yang SAMA ("pengaturan-sekolah") tapi
+// bentuk data beda (snake_case) dari yang dipakai kwitansi (camelCase) —
+// itu bikin cache saling menimpa dan kwitansi kadang nampilin "-" walau data
+// di Supabase sudah benar. Setelah save, KEDUA queryKey di-invalidate supaya
+// sidebar, kwitansi, dan form ini sendiri sama-sama refresh.
 
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -38,8 +48,10 @@ export default function EditProfilSekolahDialog({
 }: EditProfilSekolahDialogProps) {
   const queryClient = useQueryClient();
 
+  // FIX: queryKey khusus ["pengaturan-sekolah-raw"] — bukan lagi
+  // ["pengaturan-sekolah"] yang dipakai sidebar & kwitansi (camelCase).
   const { data: pengaturan, isLoading } = useQuery({
-    queryKey: ["pengaturan-sekolah"],
+    queryKey: ["pengaturan-sekolah-raw"],
     queryFn: fetchPengaturanSekolah,
     enabled: open,
   });
@@ -104,7 +116,10 @@ export default function EditProfilSekolahDialog({
         tanda_tangan_bendahara_url: ttdUrl,
       });
 
-      // Supaya kwitansi & dashboard langsung pakai data terbaru
+      // FIX: invalidate KEDUA queryKey — supaya form edit ini sendiri
+      // ("pengaturan-sekolah-raw") DAN sidebar+kwitansi ("pengaturan-sekolah")
+      // sama-sama langsung pakai data terbaru tanpa reload halaman.
+      await queryClient.invalidateQueries({ queryKey: ["pengaturan-sekolah-raw"] });
       await queryClient.invalidateQueries({ queryKey: ["pengaturan-sekolah"] });
 
       toast.success("Profil sekolah berhasil diperbarui");

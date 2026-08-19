@@ -240,9 +240,6 @@ export default function DashboardShared() {
 <div className="flex items-center justify-between">
   <div>
     <h1 className="text-2xl font-bold">Dashboard</h1>
-    <p className="text-muted-foreground text-sm">
-      KB/TK Aisyiyah Bustanul Athfal 1 Buduran
-    </p>
   </div>
   {isSuperadmin && (
     <Button
