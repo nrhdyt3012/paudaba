@@ -21,7 +21,19 @@ function slugifyNamaWali(nama: string): string {
   return s || "wali";
 }
 
+// ─── Helper: normalisasi No WA (buang semua karakter selain digit) ────────────
+// Dipakai sebagai INDIKATOR UTAMA untuk mendeteksi apakah wali di baris Excel
+// ini sebenarnya wali yang sama dengan yang sudah terdaftar di sistem —
+// jauh lebih dapat diandalkan dibanding nama, karena nama (terutama nama
+// satu kata yang umum, mis. "Ahmad", "Abdullah") sangat rawan tabrakan
+// antara dua orang yang benar-benar berbeda.
+function normalizeNoWa(wa: string | null | undefined): string {
+  return String(wa || "").replace(/\D/g, "");
+}
+
 // ─── Helper: cari slug email yang belum kepakai di DB (loop sampai unik) ──────
+// Dipakai oleh createUser (single form). Untuk alur import massal, dipakai
+// versi in-memory `buatEmailUnik` di bawah supaya tidak query DB per baris.
 async function generateEmailUnik(supabase: any, namaWali: string): Promise<string> {
   const slug = slugifyNamaWali(namaWali);
   let candidate = `${slug}@gmail.com`;
@@ -39,13 +51,164 @@ async function generateEmailUnik(supabase: any, namaWali: string): Promise<strin
   }
 }
 
-// ─── Helper: family key untuk pengelompokan import (dipakai preview & apply) ──
+// ─── Helper: family key untuk pengelompokan baris dalam SATU file import ──────
+//Ipakai untuk mengelompokkan siswa kakak-adik yang diimpor bersamaan supaya
+// berbagi satu akun wali. No WA dipakai duluan (lebih unik per keluarga),
+// baru fallback ke email eksplisit, baru fallback ke nama wali saja.
 function familyKey(r: ImportRow): string {
+  const wa = normalizeNoWa(r.no_wa);
+  if (wa) return `wa:${wa}`;
   const email = (r.email || "").trim().toLowerCase();
   if (email) return `email:${email}`;
   const wali = (r.nama_wali || "").trim().toLowerCase();
-  const wa = String(r.no_wa || "").replace(/\D/g, "");
-  return `auto:${wali}|${wa}`;
+  return `auto:${wali}`;
+}
+
+// ─── BARU: peta wali yang sudah ada di DB, dipakai untuk deteksi kecocokan ────
+// - byWa   : No WA (dinormalisasi) → data wali. INDIKATOR UTAMA.
+// - byNama : Nama wali (lowercase, trim) → data wali. INDIKATOR SEKUNDER,
+//            hanya jadi *kandidat* yang ditandai untuk dikonfirmasi admin,
+//            TIDAK pernah dipakai untuk auto-gabung sendirian.
+// - allEmails : seluruh email yang sudah dipakai, untuk memastikan email baru
+//               yang digenerate benar-benar unik (sebelumnya keunikan cuma
+//               dicek di dalam file yang sedang diimpor, jadi bisa tabrakan
+//               dengan wali lama yang sudah terdaftar dari sesi sebelumnya).
+type WaliCandidate = { id: string; email: string; namawali: string; nowa: string };
+
+async function buildWaliDbMaps(supabase: any) {
+  const { data } = await supabase
+    .from("siswa")
+    .select("wali_auth_id, email, namawali, nowa")
+    .not("wali_auth_id", "is", null);
+
+  const byWa = new Map<string, WaliCandidate>();
+  const byNama = new Map<string, WaliCandidate>();
+  const allEmails = new Set<string>();
+  const seenWaliId = new Set<string>();
+
+  for (const row of data || []) {
+    if (!row.wali_auth_id) continue;
+    if (row.email) allEmails.add(String(row.email).toLowerCase());
+    if (seenWaliId.has(row.wali_auth_id)) continue;
+    seenWaliId.add(row.wali_auth_id);
+
+    const cand: WaliCandidate = {
+      id: row.wali_auth_id,
+      email: row.email,
+      namawali: row.namawali,
+      nowa: row.nowa,
+    };
+
+    const wa = normalizeNoWa(row.nowa);
+    if (wa && !byWa.has(wa)) byWa.set(wa, cand);
+
+    const namaKey = (row.namawali || "").trim().toLowerCase();
+    if (namaKey && !byNama.has(namaKey)) byNama.set(namaKey, cand);
+  }
+
+  return { byWa, byNama, allEmails };
+}
+
+// ─── BARU: generate email unik in-memory, dicek terhadap seluruh email yang
+// sudah diketahui (DB + yang baru saja dialokasikan dalam batch ini) ──────────
+function buatEmailUnik(namaWali: string, emailTerpakai: Set<string>): string {
+  const slug = slugifyNamaWali(namaWali);
+  let candidate = `${slug}@gmail.com`;
+  let n = 1;
+  while (emailTerpakai.has(candidate.toLowerCase())) {
+    n++;
+    candidate = `${slug}${n}@gmail.com`;
+  }
+  emailTerpakai.add(candidate.toLowerCase());
+  return candidate;
+}
+
+// ─── BARU: rencana per-grup keluarga — dipakai bersama oleh Preview & Apply
+// supaya logikanya konsisten (tidak ada drift antara apa yang di-preview
+// dengan apa yang benar-benar dieksekusi). ────────────────────────────────────
+type RencanaGroup = {
+  email: string;
+  password?: string;
+  // Kalau ada -> baris-baris di grup ini akan DIGABUNG ke akun wali lama ini
+  // (tidak membuat akun auth baru sama sekali).
+  gabungKeWaliId?: string;
+  // Info untuk ditampilkan di preview / dipakai UI sebagai konfirmasi.
+  kecocokan?: "no_wa" | "nama";
+  kandidat?: WaliCandidate;
+  keputusanDefault: "gabung" | "baru";
+  keputusanFinal: "gabung" | "baru";
+};
+
+function rencanakanGroup(
+  groupRows: ImportRow[],
+  waliMaps: { byWa: Map<string, WaliCandidate>; byNama: Map<string, WaliCandidate>; allEmails: Set<string> }
+): RencanaGroup {
+  const rowWithWa = groupRows.find((r) => normalizeNoWa(r.no_wa));
+  const waKey = rowWithWa ? normalizeNoWa(rowWithWa.no_wa) : "";
+  const namaKey = (groupRows[0].nama_wali || "").trim().toLowerCase();
+
+  const explicitEmail = groupRows.find((r) => (r.email || "").trim())?.email?.trim();
+  const explicitPassword = groupRows.find((r) => (r.password || "").trim())?.password?.trim();
+  const firstWithNis = groupRows.find((r) => String(r.NIS || "").trim());
+  const password = explicitPassword || (firstWithNis ? String(firstWithNis.NIS).trim() : undefined);
+
+  // ── 1. Indikator UTAMA: No WA sama persis dengan wali yang sudah terdaftar
+  let kandidat = waKey ? waliMaps.byWa.get(waKey) : undefined;
+  let kecocokan: "no_wa" | "nama" | undefined = kandidat ? "no_wa" : undefined;
+
+  // ── 2. Indikator SEKUNDER: kalau No WA tidak cocok (atau kosong), baru
+  // lihat kecocokan nama — TAPI ini cuma jadi kandidat yang ditandai, bukan
+  // auto-gabung, karena nama sendirian tidak cukup dapat diandalkan.
+  if (!kandidat && namaKey) {
+    const kandidatNama = waliMaps.byNama.get(namaKey);
+    if (kandidatNama) {
+      kandidat = kandidatNama;
+      kecocokan = "nama";
+    }
+  }
+
+  // Rekomendasi default sistem: hanya auto-gabung kalau kecocokan berasal
+  // dari No WA (indikator kuat). Kecocokan nama-saja defaultnya "baru",
+  // supaya tidak diam-diam menggabungkan dua wali berbeda yang kebetulan
+  // namanya sama.
+  const keputusanDefault: "gabung" | "baru" = kecocokan === "no_wa" ? "gabung" : "baru";
+
+  // Admin bisa override lewat field `keputusanWali` yang dikirim dari client
+  // (dipilih di UI preview). Kalau tidak ada override, pakai rekomendasi
+  // default. Override "gabung" hanya berlaku kalau memang ada kandidat.
+  const keputusanManual = groupRows.find((r) => r.keputusanWali)?.keputusanWali;
+  const keputusanFinal: "gabung" | "baru" =
+    keputusanManual === "gabung" && kandidat
+      ? "gabung"
+      : keputusanManual === "baru"
+      ? "baru"
+      : keputusanDefault;
+
+  if (keputusanFinal === "gabung" && kandidat) {
+    return {
+      email: kandidat.email,
+      gabungKeWaliId: kandidat.id,
+      kecocokan,
+      kandidat,
+      keputusanDefault,
+      keputusanFinal,
+    };
+  }
+
+  // Wali baru: pakai email eksplisit dari Excel kalau ada, kalau tidak
+  // generate dari slug nama — dicek keunikannya terhadap SELURUH email yang
+  // sudah diketahui (DB + yang baru dialokasikan di batch ini).
+  const email = explicitEmail || buatEmailUnik(groupRows[0].nama_wali, waliMaps.allEmails);
+  if (explicitEmail) waliMaps.allEmails.add(explicitEmail.toLowerCase());
+
+  return {
+    email,
+    password,
+    kecocokan,
+    kandidat,
+    keputusanDefault,
+    keputusanFinal,
+  };
 }
 
 // ─── Create User ──────────────────────────────────────────────────────────────
@@ -407,11 +570,28 @@ export async function promoteKelasSiswa(prevState: any, formData: FormData) {
 }
 
 // ─── Delete User ──────────────────────────────────────────────────────────────
+// PENTING: `id` dari form ini adalah id BARIS di tabel `siswa`, BUKAN
+// `wali_auth_id` (id akun di auth.users). Dua UUID ini berbeda entitas —
+// yang pertama mengidentifikasi satu siswa, yang kedua mengidentifikasi
+// akun login wali (yang bisa dipakai bersama oleh beberapa anak).
+//
+// Sebelumnya fungsi ini langsung memanggil
+// `supabase.auth.admin.deleteUser(userId)` dengan `userId` = id siswa,
+// sehingga Supabase selalu gagal dengan "User not found" (karena id siswa
+// memang tidak pernah terdaftar di auth.users) dan baris siswa tidak
+// pernah ikut terhapus.
+//
+// Selain itu, hapus siswa seharusnya TIDAK otomatis menghapus akun wali —
+// kalau wali tersebut masih punya anak lain, akunnya harus tetap ada
+// supaya anak lainnya masih bisa login. Akun wali baru dihapus kalau anak
+// yang dihapus ini adalah anak TERAKHIR dari wali tersebut (pola yang
+// sama dengan yang sudah dipakai di updateUser saat memindahkan siswa ke
+// wali lain).
 export async function deleteUser(prevState: AuthFormState, formData: FormData) {
   const supabase = await createClient({ isAdmin: true });
-  const userId = formData.get("id") as string;
+  const siswaId = formData.get("id") as string;
 
-  if (!userId) {
+  if (!siswaId) {
     return {
       status: "error",
       errors: { _form: ["ID siswa tidak valid"] },
@@ -420,13 +600,21 @@ export async function deleteUser(prevState: AuthFormState, formData: FormData) {
 
   const { data: siswaData } = await supabase
     .from("siswa")
-    .select("namasiswa")
-    .eq("id", userId)
+    .select("namasiswa, wali_auth_id")
+    .eq("id", siswaId)
     .maybeSingle();
 
-  const namaSiswa = siswaData?.namasiswa || userId;
+  if (!siswaData) {
+    return {
+      status: "error",
+      errors: { _form: ["Data siswa tidak ditemukan"] },
+    };
+  }
 
-  const { bisaDihapus, jumlahTransaksi } = await cekSiswaBisaDihapus(supabase, userId);
+  const namaSiswa = siswaData.namasiswa || siswaId;
+  const waliAuthId = siswaData.wali_auth_id;
+
+  const { bisaDihapus, jumlahTransaksi } = await cekSiswaBisaDihapus(supabase, siswaId);
 
   if (!bisaDihapus) {
     return {
@@ -441,15 +629,38 @@ export async function deleteUser(prevState: AuthFormState, formData: FormData) {
     };
   }
 
-  await bersihkanDataTagihanSiswa(supabase, userId);
+  await bersihkanDataTagihanSiswa(supabase, siswaId);
 
-  const { error } = await supabase.auth.admin.deleteUser(userId);
+  // ── 1. Hapus baris siswa itu sendiri (bukan akun auth) ─────────────────────
+  const { error: deleteSiswaError } = await supabase
+    .from("siswa")
+    .delete()
+    .eq("id", siswaId);
 
-  if (error) {
+  if (deleteSiswaError) {
     return {
       status: "error",
-      errors: { ...prevState?.errors, _form: [error.message] },
+      errors: { ...prevState?.errors, _form: [`Gagal menghapus data siswa: ${deleteSiswaError.message}`] },
     };
+  }
+
+  // ── 2. Kalau wali sudah tidak punya anak tersisa, baru hapus akun login-nya
+  if (waliAuthId) {
+    const { count: sisaAnak } = await supabase
+      .from("siswa")
+      .select("id", { count: "exact", head: true })
+      .eq("wali_auth_id", waliAuthId);
+
+    if ((sisaAnak ?? 0) === 0) {
+      const { error: authError } = await supabase.auth.admin.deleteUser(waliAuthId);
+      // Baris siswa sudah terlanjur terhapus di langkah 1 — kalau hapus akun
+      // auth gagal, jangan gagalkan seluruh operasi (siswa tetap terhapus),
+      // cukup catat di changelog supaya admin tahu akun wali perlu dibersihkan
+      // manual kalau memang ada masalah.
+      if (authError) {
+        console.error("[deleteUser] Gagal menghapus akun auth wali:", authError.message);
+      }
+    }
   }
 
   await writeChangelog({
@@ -464,16 +675,20 @@ export async function deleteUser(prevState: AuthFormState, formData: FormData) {
 }
 
 // ─── Import Users dari Excel (Bulk) ────────────────────────────────────────────
-// 1. NIS jadi kunci pencocokan: NIS sudah ada di DB -> UPDATE (data akademik
-//    saja, akun/email TIDAK disentuh). NIS belum ada -> INSERT + generate
-//    akun wali baru.
-// 2. Mode UPDATE cuma menimpa field yang ADA ISINYA di file impor.
-// 3. Email & Password boleh dikosongkan di file — digenerate otomatis:
-//    email dari slug Nama Wali (+@gmail.com), password dari NIS anak
-//    pertama dalam "keluarga" yang sama.
-// 4. Pakai importUserSchema (JK & No WA opsional).
+// 1. NIS jadi kunci pencocokan SISWA: NIS sudah ada di DB -> UPDATE (data
+//    akademik saja, akun/email TIDAK disentuh). NIS belum ada -> INSERT.
+// 2. Untuk baris INSERT, pencocokan WALI memakai dua indikator:
+//      a) No WA (UTAMA)   — cocok persis -> direkomendasikan GABUNG otomatis.
+//      b) Nama Wali (SEKUNDER) — cocok tapi No WA beda/kosong -> hanya
+//         ditandai sebagai KANDIDAT, defaultnya tetap dibuat wali BARU,
+//         supaya dua orang berbeda dengan nama sama (mis. "Ahmad") tidak
+//         diam-diam digabung.
+// 3. Admin bisa override keputusan gabung/baru per grup lewat field
+//    `keputusanWali` pada ImportRow (diisi dari pilihan di UI preview).
+// 4. Mode UPDATE cuma menimpa field yang ADA ISINYA di file impor.
 // 5. previewImportUsersBulk() — TIDAK menulis ke DB, cuma mensimulasikan
-//    hasilnya (dipakai untuk tombol "Preview" sebelum "Terapkan Import").
+//    hasilnya, dengan logika PERSIS SAMA (rencanakanGroup) seperti apply,
+//    supaya tidak ada perbedaan antara apa yang di-preview vs dieksekusi.
 export type ImportRow = {
   nama_siswa: string;
   NIS: string;
@@ -488,6 +703,9 @@ export type ImportRow = {
   tanggal_lahir: string;
   alamat?: string;
   tipe_spp?: string;
+  // BARU: override keputusan gabung/pisah akun wali, dipilih admin di UI
+  // preview. undefined = ikuti rekomendasi otomatis sistem.
+  keputusanWali?: "gabung" | "baru";
 };
 
 export type ImportResult = {
@@ -521,6 +739,11 @@ export type ImportPlanRow = {
   email?: string;
   password?: string;
   pesan?: string;
+  // ── BARU: info kecocokan wali, dipakai UI untuk kontrol gabung/pisah ──────
+  familyKey?: string;
+  kecocokanWali?: "no_wa" | "nama";
+  waliKandidat?: { id: string; email: string; namawali: string; nowa: string } | null;
+  keputusanDefault?: "gabung" | "baru";
 };
 
 export type ImportPlanResult = {
@@ -550,50 +773,27 @@ export async function previewImportUsersBulk(rows: ImportRow[]): Promise<ImportP
     : { data: [] as any[] };
   const nisAda = new Set((existingSiswa || []).map((s: any) => String(s.nis).trim()));
 
-  // ── 2. Kelompokkan baris yang akan INSERT per "keluarga" ───────────────────
+  // ── 2. Peta wali yang sudah ada di DB (No WA = utama, Nama = sekunder) ─────
+  const waliMaps = await buildWaliDbMaps(supabase);
+
+  // ── 3. Kelompokkan baris yang akan INSERT per "keluarga" (dalam batch ini) ─
   const insertRows = rows.filter((r) => {
     const nis = String(r.NIS || "").trim();
     return !(nis && nisAda.has(nis));
   });
 
-  const groups = new Map<string, { rows: ImportRow[]; email?: string; password?: string }>();
+  const groups = new Map<string, ImportRow[]>();
   for (const r of insertRows) {
     const key = familyKey(r);
-    if (!groups.has(key)) groups.set(key, { rows: [] });
-    groups.get(key)!.rows.push(r);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(r);
   }
 
-  // ── 3. Simulasikan email & password per grup ────────────────────────────────
-  const usedSlugs = new Map<string, number>();
-  for (const [, group] of groups) {
-    const explicitEmail = group.rows.find((r) => (r.email || "").trim())?.email?.trim();
-    const explicitPassword = group.rows.find((r) => (r.password || "").trim())?.password?.trim();
-
-    if (explicitEmail) {
-      group.email = explicitEmail;
-    } else {
-      const slug = slugifyNamaWali(group.rows[0].nama_wali);
-      const n = usedSlugs.get(slug) || 0;
-      usedSlugs.set(slug, n + 1);
-      group.email = n === 0 ? `${slug}@gmail.com` : `${slug}${n + 1}@gmail.com`;
-    }
-
-    if (explicitPassword) {
-      group.password = explicitPassword;
-    } else {
-      const firstWithNis = group.rows.find((r) => String(r.NIS || "").trim());
-      group.password = firstWithNis ? String(firstWithNis.NIS).trim() : undefined;
-    }
+  // ── 4. Rencanakan tiap grup (gabung ke wali lama, atau bikin wali baru) ────
+  const rencanaPerGroup = new Map<string, RencanaGroup>();
+  for (const [key, groupRows] of groups) {
+    rencanaPerGroup.set(key, rencanakanGroup(groupRows, waliMaps));
   }
-
-  // ── 4. Cek email grup mana yang kebetulan sudah ada wali-nya di DB ─────────
-  const groupEmails = Array.from(
-    new Set(Array.from(groups.values()).map((g) => g.email).filter(Boolean))
-  ) as string[];
-  const { data: waliTerdaftar } = groupEmails.length
-    ? await supabase.from("siswa").select("email").in("email", groupEmails)
-    : { data: [] as any[] };
-  const emailSudahAda = new Set((waliTerdaftar || []).map((w: any) => w.email));
 
   // ── 5. Susun rencana per baris ───────────────────────────────────────────────
   for (let i = 0; i < rows.length; i++) {
@@ -628,7 +828,8 @@ export async function previewImportUsersBulk(rows: ImportRow[]): Promise<ImportP
       continue;
     }
 
-    const group = groups.get(familyKey(row))!;
+    const key = familyKey(row);
+    const rencana = rencanaPerGroup.get(key)!;
 
     const jkLower = (row.jenis_kelamin || "").toLowerCase().trim();
     let jenisKelamin: "Laki-laki" | "Perempuan" | undefined;
@@ -636,8 +837,8 @@ export async function previewImportUsersBulk(rows: ImportRow[]): Promise<ImportP
     else if (jkLower === "perempuan" || jkLower === "p") jenisKelamin = "Perempuan";
 
     const validated = importUserSchema.safeParse({
-      email: group.email,
-      password: group.password || `siswa${nis || "123456"}`,
+      email: rencana.email,
+      password: rencana.password || `siswa${nis || "123456"}`,
       nama_siswa: row.nama_siswa,
       NIS: nis,
       jenis_kelamin: jenisKelamin,
@@ -659,21 +860,35 @@ export async function previewImportUsersBulk(rows: ImportRow[]): Promise<ImportP
         aksi: "GAGAL",
         keterangan: "Data tidak valid",
         pesan: msgs || "Data tidak valid",
+        familyKey: key,
         ...dataDasar,
       });
       plan.akanGagal++;
       continue;
     }
 
-    const gabungAkunLama = emailSudahAda.has(group.email!);
+    let keterangan: string;
+    if (rencana.keputusanFinal === "gabung" && rencana.kandidat) {
+      keterangan =
+        rencana.kecocokan === "no_wa"
+          ? `Siswa baru — digabung ke akun wali "${rencana.kandidat.namawali}" (No WA sama)`
+          : `Siswa baru — digabung ke akun wali "${rencana.kandidat.namawali}" (dikonfirmasi manual)`;
+    } else if (rencana.kecocokan === "nama") {
+      keterangan = `⚠ Nama wali mirip dengan "${rencana.kandidat?.namawali}" yang sudah terdaftar, tapi No WA berbeda — akan dibuat sebagai wali BARU. Periksa apakah ini orang yang sama.`;
+    } else {
+      keterangan = "Siswa baru — akun wali baru akan dibuat";
+    }
+
     plan.rows.push({
       baris,
       aksi: "TAMBAH",
-      keterangan: gabungAkunLama
-        ? "Siswa baru — digabung ke akun wali yang sudah ada"
-        : "Siswa baru — akun wali baru akan dibuat",
-      email: group.email,
-      password: gabungAkunLama ? undefined : group.password,
+      keterangan,
+      email: rencana.email,
+      password: rencana.keputusanFinal === "gabung" ? undefined : rencana.password,
+      familyKey: key,
+      kecocokanWali: rencana.kecocokan,
+      waliKandidat: rencana.kandidat || null,
+      keputusanDefault: rencana.keputusanDefault,
       ...dataDasar,
     });
     plan.akanDitambahkan++;
@@ -707,47 +922,31 @@ export async function importUsersBulk(rows: ImportRow[]): Promise<ImportResult> 
     if (s.nis) nisToExisting.set(String(s.nis).trim(), { id: s.id, wali_auth_id: s.wali_auth_id });
   });
 
-  // ── 2. Kelompokkan baris yang butuh INSERT (NIS belum ada) per "keluarga" ──
-  type Group = { rows: ImportRow[]; email?: string; password?: string };
-  const groups = new Map<string, Group>();
+  // ── 2. Peta wali yang sudah ada di DB (No WA = utama, Nama = sekunder) ─────
+  const waliMaps = await buildWaliDbMaps(supabase);
 
+  // ── 3. Kelompokkan baris yang butuh INSERT (NIS belum ada) per "keluarga" ──
   const insertRows = rows.filter((r) => {
     const nis = String(r.NIS || "").trim();
     return !(nis && nisToExisting.has(nis));
   });
 
+  const groups = new Map<string, ImportRow[]>();
   for (const r of insertRows) {
     const key = familyKey(r);
-    if (!groups.has(key)) groups.set(key, { rows: [] });
-    groups.get(key)!.rows.push(r);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(r);
   }
 
-  // ── 3. Generate email & password per grup (kalau belum diisi manual) ──────
-  const usedSlugs = new Map<string, number>();
-  for (const [, group] of groups) {
-    const explicitEmail = group.rows.find((r) => (r.email || "").trim())?.email?.trim();
-    const explicitPassword = group.rows.find((r) => (r.password || "").trim())?.password?.trim();
-
-    if (explicitEmail) {
-      group.email = explicitEmail;
-    } else {
-      const slug = slugifyNamaWali(group.rows[0].nama_wali);
-      const n = usedSlugs.get(slug) || 0;
-      usedSlugs.set(slug, n + 1);
-      group.email = n === 0 ? `${slug}@gmail.com` : `${slug}${n + 1}@gmail.com`;
-    }
-
-    if (explicitPassword) {
-      group.password = explicitPassword;
-    } else {
-      const firstWithNis = group.rows.find((r) => String(r.NIS || "").trim());
-      group.password = firstWithNis ? String(firstWithNis.NIS).trim() : undefined;
-    }
+  // ── 4. Rencanakan tiap grup — logika SAMA PERSIS dengan preview ────────────
+  const rencanaPerGroup = new Map<string, RencanaGroup>();
+  for (const [key, groupRows] of groups) {
+    rencanaPerGroup.set(key, rencanakanGroup(groupRows, waliMaps));
   }
 
   const groupToWaliId = new Map<string, string>();
 
-  // ── 4. Proses tiap baris ──────────────────────────────────────────────────
+  // ── 5. Proses tiap baris ──────────────────────────────────────────────────
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const baris = i + 2;
@@ -795,11 +994,11 @@ export async function importUsersBulk(rows: ImportRow[]): Promise<ImportResult> 
 
     // ── MODE INSERT: siswa baru ───────────────────────────────────────────
     const key = familyKey(row);
-    const group = groups.get(key)!;
+    const rencana = rencanaPerGroup.get(key)!;
 
     const validated = importUserSchema.safeParse({
-      email: group.email,
-      password: group.password || `siswa${nis || "123456"}`,
+      email: rencana.email,
+      password: rencana.password || `siswa${nis || "123456"}`,
       nama_siswa: row.nama_siswa,
       NIS: nis,
       jenis_kelamin: jenisKelamin,
@@ -821,19 +1020,16 @@ export async function importUsersBulk(rows: ImportRow[]): Promise<ImportResult> 
       continue;
     }
 
-    let waliAuthId = groupToWaliId.get(key);
+    let waliAuthId: string | undefined;
 
-    if (!waliAuthId) {
-      const { data: waliExisting } = await supabase
-        .from("siswa")
-        .select("wali_auth_id")
-        .eq("email", validated.data.email)
-        .limit(1)
-        .maybeSingle();
+    if (rencana.keputusanFinal === "gabung" && rencana.gabungKeWaliId) {
+      // ── Digabung ke wali yang SUDAH ADA — tidak membuat akun auth baru,
+      // password/email wali lama tidak disentuh sama sekali. ────────────
+      waliAuthId = rencana.gabungKeWaliId;
+    } else {
+      waliAuthId = groupToWaliId.get(key);
 
-      if (waliExisting) {
-        waliAuthId = waliExisting.wali_auth_id;
-      } else {
+      if (!waliAuthId) {
         const { error: authError, data: authData } = await supabase.auth.admin.createUser({
           email: validated.data.email!,
           password: validated.data.password!,
@@ -855,9 +1051,9 @@ export async function importUsersBulk(rows: ImportRow[]): Promise<ImportResult> 
           baris, nama: row.nama_siswa || "-",
           email: validated.data.email!, password: validated.data.password!,
         });
-      }
 
-      groupToWaliId.set(key, waliAuthId!);
+        groupToWaliId.set(key, waliAuthId);
+      }
     }
 
     const { error: insertError } = await supabase.from("siswa").insert({
