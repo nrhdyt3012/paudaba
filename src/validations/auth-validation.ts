@@ -24,11 +24,15 @@ export const createUserSchema = z.object({
   tipe_spp: z.enum(["reguler", "subsidi"]).default("reguler"),
   role: z.string().default("siswa"),
 }).superRefine((data, ctx) => {
-  // ── BARU: Email & password untuk wali baru sekarang OPSIONAL —
-  // kalau dikosongkan, server akan generate otomatis (email dari slug
-  // Nama Wali, password dari NIS). Kalau DIISI manual, tetap divalidasi
-  // formatnya supaya tidak ada email asal-asalan / password terlalu pendek
-  // yang lolos ke Supabase Auth.
+  // ── Email & password untuk wali baru OPSIONAL — kalau dikosongkan, server
+  // akan generate otomatis (email dari slug NAMA SISWA, password dari NIS).
+  // Kalau DIISI manual, tetap divalidasi formatnya supaya tidak ada email
+  // asal-asalan / password terlalu pendek yang lolos ke Supabase Auth.
+  //
+  // Catatan: field nama_wali/tempat_lahir/tanggal_lahir di form manual ini
+  // TETAP wajib (beda dengan importUserSchema di bawah, yang sengaja
+  // dilonggarkan khusus untuk jalur impor Excel karena data sekolah sering
+  // belum lengkap saat impor massal).
   if (data.mode === "baru") {
     if (data.email && !z.string().email().safeParse(data.email).success) {
       ctx.addIssue({ path: ["email"], code: z.ZodIssueCode.custom, message: "Format email tidak valid" });
@@ -61,13 +65,17 @@ export const updateUserSchema = z.object({
 });
 
 // ── Skema khusus Impor Excel massal ─────────────────────────────────────────
-// Data sekolah yang diimpor massal sering belum lengkap (terutama Jenis
-// Kelamin & No WA wali). Field itu dibuat OPSIONAL di sini supaya baris
-// tetap bisa masuk sistem (ditandai perlu dilengkapi nanti), bukan ditolak
-// total seperti kalau pakai createUserSchema yang strict (dipakai form
-// Tambah Siswa manual, sengaja dibiarkan strict di sana).
-// Field kritikal (Nama, NIS, Kelas, Angkatan, Nama Wali) tetap wajib,
-// karena dipakai utk identifikasi, billing, & generate akun wali.
+// Data sekolah yang diimpor massal sering belum lengkap (terutama Nama Wali,
+// Jenis Kelamin & No WA). Field-field itu dibuat OPSIONAL di sini supaya
+// baris tetap bisa masuk sistem (ditandai perlu dilengkapi nanti), bukan
+// ditolak total seperti kalau pakai createUserSchema yang strict (dipakai
+// form Tambah Siswa manual, sengaja dibiarkan strict di sana).
+// Field kritikal (Nama Siswa, NIS, Kelas, Angkatan) tetap wajib, karena
+// dipakai untuk identifikasi & billing.
+// FIX: nama_wali sebelumnya wajib di sini (dipakai untuk generate email).
+// Sekarang basis pembuatan email sudah pindah ke NAMA SISWA (lihat
+// actions.ts), jadi nama_wali tidak lagi jadi syarat — boleh kosong dan
+// tetap bisa dilengkapi belakangan lewat Edit atau impor ulang.
 export const importUserSchema = z.object({
   email: z.string().optional(),
   password: z.string().optional(),
@@ -76,7 +84,7 @@ export const importUserSchema = z.object({
   jenis_kelamin: z.enum(["Laki-laki", "Perempuan"]).optional(),
   kelas: z.string().min(1, "Kelas wajib diisi"),
   angkatan: z.string().min(1, "Angkatan wajib diisi"),
-  nama_wali: z.string().min(1, "Nama wali wajib diisi (dipakai untuk generate akun login)"),
+  nama_wali: z.string().optional(),
   no_wa: z.string().optional(),
   tempat_lahir: z.string().optional(),
   tanggal_lahir: z.string().optional(),
