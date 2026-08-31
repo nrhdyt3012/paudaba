@@ -126,7 +126,7 @@ export default function AppSidebar() {
   };
 
   const handleGantiPassword = () => {
-    router.push("/ganti-password");
+    router.push("/reset-password");
   };
 
   const isSuperadmin = profile?.role === "superadmin";
