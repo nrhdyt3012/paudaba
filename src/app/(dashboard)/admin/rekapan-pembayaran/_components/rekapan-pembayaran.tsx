@@ -3,6 +3,7 @@
 import DropdownAction from "@/components/common/dropdown-action";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -19,6 +20,8 @@ import {
   Calendar,
   ImageIcon,
   Printer,
+  FileStack,
+  Search,
 } from "lucide-react";
 import { useMemo, useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
@@ -40,6 +43,13 @@ import KwitansiTemplate, {
   KwitansiData,
   SekolahInfo,
 } from "@/components/common/kwitansi-template";
+// BARU: template laporan riwayat menyeluruh — sama persis dengan yang
+// dipakai di halaman Riwayat Pembayaran milik wali siswa, di-reuse di sini
+// supaya bendahara/superadmin bisa mencetak riwayat lengkap per siswa juga.
+import LaporanRiwayatTemplate, {
+  LaporanRiwayatData,
+  TagihanBelumLunasItem,
+} from "@/components/common/laporan-riwayat-template";
 // FIX: pakai hook bersama untuk queryKey ["pengaturan-sekolah"] — supaya
 // bentuk datanya (camelCase) sama persis dengan yang dipakai app-sidebar.tsx,
 // tidak ada lagi dua queryFn berbeda yang berebut satu queryKey (penyebab
@@ -279,6 +289,304 @@ function ActionMenuRekap({
   );
 }
 
+// ─── BARU: Dialog pencarian siswa + tombol cetak riwayat menyeluruh ───────────
+// Dipakai oleh bendahara/superadmin di menu Rekapan Pembayaran, supaya bisa
+// mencetak "Laporan Riwayat Pembayaran" per siswa (semua tagihan & transaksi,
+// bukan cuma bulan yang lagi dipilih) — persis seperti fitur yang sudah ada
+// di halaman Riwayat Pembayaran milik wali siswa.
+function CetakRiwayatSiswaDialog({
+  sekolah,
+}: {
+  sekolah: SekolahInfo | null | undefined;
+}) {
+  const supabase = createClient();
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [printTarget, setPrintTarget] = useState<{ siswaId: number; nama: string } | null>(null);
+
+  // Debounce input pencarian supaya tidak query ke Supabase setiap ketukan
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const { data: hasilSiswa, isFetching } = useQuery({
+    queryKey: ["cari-siswa-cetak-riwayat", debouncedSearch],
+    enabled: open && debouncedSearch.length >= 2,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("siswa")
+        .select("id, namasiswa, kelas, namawali")
+        .or(`namasiswa.ilike.%${debouncedSearch}%,kelas.ilike.%${debouncedSearch}%`)
+        .order("namasiswa", { ascending: true })
+        .limit(15);
+
+      if (error) {
+        toast.error("Gagal mencari siswa", { description: error.message });
+        return [];
+      }
+      return data || [];
+    },
+  });
+
+  const closeDialog = (o: boolean) => {
+    setOpen(o);
+    if (!o) {
+      setSearch("");
+      setDebouncedSearch("");
+    }
+  };
+
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <FileStack className="mr-2 h-4 w-4" />
+        Cetak Riwayat per Siswa
+      </Button>
+
+      <Dialog open={open} onOpenChange={closeDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Cetak Riwayat Pembayaran per Siswa</DialogTitle>
+          </DialogHeader>
+
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              autoFocus
+              placeholder="Cari nama siswa atau kelas... (mis. Muhammad Firdaus)"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-8"
+            />
+          </div>
+
+          <div className="max-h-80 overflow-y-auto space-y-1.5 -mx-1 px-1 mt-1">
+            {debouncedSearch.length < 2 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                Ketik minimal 2 huruf untuk mencari siswa
+              </p>
+            ) : isFetching ? (
+              <p className="text-sm text-muted-foreground text-center py-8">Mencari...</p>
+            ) : !hasilSiswa?.length ? (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                Tidak ada siswa yang cocok dengan pencarian
+              </p>
+            ) : (
+              hasilSiswa.map((s: any) => (
+                <div
+                  key={s.id}
+                  className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2 hover:bg-muted/50 transition-colors"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{s.namasiswa}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {s.kelas || "-"}
+                      {s.namawali ? ` · Wali: ${s.namawali}` : ""}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1 shrink-0"
+                    disabled={printTarget !== null}
+                    onClick={() => setPrintTarget({ siswaId: s.id, nama: s.namasiswa })}
+                  >
+                    <Printer className="h-3 w-3" />
+                    Cetak
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Runner terpisah: fetch data lengkap siswa terpilih lalu langsung
+          trigger dialog print begitu data & konten siap. */}
+      {printTarget && (
+        <CetakRiwayatSiswaRunner
+          key={printTarget.siswaId}
+          siswaId={printTarget.siswaId}
+          namaSiswa={printTarget.nama}
+          sekolah={sekolah}
+          onDone={() => setPrintTarget(null)}
+        />
+      )}
+    </>
+  );
+}
+
+// ─── BARU: fetch riwayat lengkap 1 siswa (semua tagihan + transaksi SUCCESS)
+// lalu langsung memicu dialog print begitu data siap. Query & susunan data
+// persis sama dengan halaman Riwayat Pembayaran milik wali siswa, supaya
+// hasil cetaknya identik — bedanya di sini idsiswa datang dari hasil
+// pencarian, bukan dari activeSiswaId di auth store.
+function CetakRiwayatSiswaRunner({
+  siswaId,
+  namaSiswa,
+  sekolah,
+  onDone,
+}: {
+  siswaId: number;
+  namaSiswa: string;
+  sekolah: SekolahInfo | null | undefined;
+  onDone: () => void;
+}) {
+  const supabase = createClient();
+  const contentRef = useRef<HTMLDivElement>(null);
+  const hasPrinted = useRef(false);
+
+  const handlePrint = useReactToPrint({
+    contentRef,
+    documentTitle: `Laporan-Riwayat-${namaSiswa}`,
+    onAfterPrint: onDone,
+  });
+
+  const { data: siswaData } = useQuery({
+    queryKey: ["siswa-detail-cetak-riwayat", siswaId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("siswa").select("*").eq("id", siswaId).single();
+      if (error) {
+        toast.error("Gagal memuat data siswa", { description: error.message });
+        return null;
+      }
+      return data;
+    },
+  });
+
+  const { data: riwayatList, isSuccess: riwayatSelesai } = useQuery({
+    queryKey: ["riwayat-siswa-cetak-riwayat", siswaId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("tagihan_siswa")
+        .select(`
+          idtagihansiswa,
+          jumlahtagihan,
+          jumlahterbayar,
+          statuspembayaran,
+          bulan,
+          tahun,
+          namatagihan,
+          jenjang,
+          pembayaran(
+            idpembayaran,
+            jumlahdibayar,
+            tanggalpembayaran,
+            metodepembayaran,
+            statuspembayaran,
+            sisa_setelah_transaksi_ini
+          )
+        `)
+        .eq("idsiswa", siswaId)
+        .order("tahun", { ascending: false })
+        .order("bulan", { ascending: false });
+
+      if (error) {
+        toast.error("Gagal memuat riwayat siswa", { description: error.message });
+        return [];
+      }
+      return data || [];
+    },
+  });
+
+  // Begitu data siswa & riwayat sudah siap dan konten hidden sudah sempat
+  // ter-render dengan data final, langsung buka dialog print browser.
+  useEffect(() => {
+    if (riwayatSelesai && siswaData && riwayatList && !hasPrinted.current) {
+      hasPrinted.current = true;
+      const t = setTimeout(() => handlePrint(), 150);
+      return () => clearTimeout(t);
+    }
+  }, [riwayatSelesai, siswaData, riwayatList, handlePrint]);
+
+  if (!riwayatSelesai || !siswaData || !riwayatList) {
+    return null;
+  }
+
+  const now = new Date();
+
+  // Tabel: rangkum SEMUA transaksi dari SEMUA tagihan jadi satu list, urut
+  // kronologis (paling lama duluan) — persis seperti mutasi rekening.
+  const allItems = (riwayatList as any[])
+    .flatMap((tagihan) =>
+      (tagihan.pembayaran ?? [])
+        .filter((p: any) => p.statuspembayaran === "SUCCESS")
+        .map((p: any) => ({
+          idpembayaran: p.idpembayaran,
+          tanggalpembayaran: p.tanggalpembayaran,
+          namatagihan: tagihan.namatagihan || "-",
+          periode: `${BULAN_NAMA[tagihan.bulan]} ${tagihan.tahun}`,
+          totalTagihan: parseFloat(tagihan.jumlahtagihan),
+          jumlahDibayar: parseFloat(p.jumlahdibayar || "0"),
+          sisaSetelahTransaksi:
+            p.sisa_setelah_transaksi_ini != null
+              ? Number(p.sisa_setelah_transaksi_ini)
+              : Math.max(0, parseFloat(tagihan.jumlahtagihan) - parseFloat(tagihan.jumlahterbayar || "0")),
+          metodepembayaran: p.metodepembayaran,
+        }))
+    )
+    .sort(
+      (a, b) => new Date(a.tanggalpembayaran).getTime() - new Date(b.tanggalpembayaran).getTime()
+    );
+
+  const totalDibayarKeseluruhan = allItems.reduce((s, it) => s + it.jumlahDibayar, 0);
+
+  const tagihanBelumLunas: TagihanBelumLunasItem[] = (riwayatList as any[])
+    .filter((t) => t.statuspembayaran !== "LUNAS")
+    .sort((a, b) => (a.tahun * 12 + a.bulan) - (b.tahun * 12 + b.bulan))
+    .map((t) => {
+      const total = parseFloat(t.jumlahtagihan);
+      const sudahDibayar = parseFloat(t.jumlahterbayar || "0");
+      return {
+        idtagihansiswa: t.idtagihansiswa,
+        namatagihan: t.namatagihan || "-",
+        periode: `${BULAN_NAMA[t.bulan]} ${t.tahun}`,
+        totalTagihan: total,
+        sudahDibayar,
+        sisaTagihan: Math.max(0, total - sudahDibayar),
+      };
+    });
+
+  const totalSisaBelumLunas = tagihanBelumLunas.reduce((s, t) => s + t.sisaTagihan, 0);
+
+  const totalTagihanKeseluruhan = (riwayatList as any[]).reduce(
+    (s, t) => s + parseFloat(t.jumlahtagihan),
+    0
+  );
+
+  const sekolahData: SekolahInfo = {
+    namaSekolah: sekolah?.namaSekolah || "-",
+    alamatSekolah: sekolah?.alamatSekolah || "-",
+    logoUrl: sekolah?.logoUrl || null,
+    namaBendahara: sekolah?.namaBendahara || "-",
+    tandaTanganUrl: sekolah?.tandaTanganUrl || null,
+  };
+
+  const laporanData: LaporanRiwayatData = {
+    namaSiswa: (siswaData as any).namasiswa || (siswaData as any).namaSiswa || "-",
+    kelas: (siswaData as any).kelas || "-",
+    namaWali: (siswaData as any).namawali || (siswaData as any).namaWali || "-",
+    tanggalCetak: now.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" }),
+    jamCetak: now.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }).replace(":", ".") + " WIB",
+    items: allItems,
+    totalDibayarKeseluruhan,
+    tagihanBelumLunas,
+    totalSisaBelumLunas,
+    totalTagihanKeseluruhan,
+    sekolah: sekolahData,
+  };
+
+  return (
+    <div className="hidden">
+      <div ref={contentRef}>
+        <LaporanRiwayatTemplate data={laporanData} />
+      </div>
+    </div>
+  );
+}
+
 // ─── Komponen Utama ────────────────────────────────────────────────────────────
 export default function RekapanPembayaran() {
   const supabase = createClient();
@@ -298,10 +606,11 @@ export default function RekapanPembayaran() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // FIX: ambil data profil sekolah lewat hook bersama `usePengaturanSekolah`
-  // (queryKey ["pengaturan-sekolah"], bentuk camelCase) — jangan bikin
-  // useQuery terpisah di sini lagi, supaya tidak collide dengan cache yang
-  // dipakai app-sidebar.tsx dan komponen kwitansi lain.
+  // FIX: sebelumnya `usePengaturanSekolah` cuma di-import tapi tidak pernah
+  // dipanggil di komponen ini, padahal `sekolahInfo` dipakai di bawah untuk
+  // ActionMenuRekap (kwitansi) — bug ini menyebabkan sekolahInfo selalu
+  // undefined. Sekarang dipanggil di sini, satu sumber data untuk kwitansi
+  // per transaksi maupun fitur cetak riwayat per siswa yang baru.
   const { data: sekolahInfo } = usePengaturanSekolah();
 
   const { data: pembayaranData, isLoading } = useQuery({
@@ -477,7 +786,7 @@ export default function RekapanPembayaran() {
         </CardContent>
       </Card>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button variant="outline" size="icon" onClick={handlePrevMonth}>
           <ChevronLeft className="h-4 w-4" />
         </Button>
@@ -502,6 +811,13 @@ export default function RekapanPembayaran() {
         <Button variant="outline" size="icon" onClick={handleNextMonth}>
           <ChevronRight className="h-4 w-4" />
         </Button>
+
+        {/* BARU: tombol cetak riwayat menyeluruh per siswa, dipisah dari
+            navigasi bulan supaya jelas scope-nya beda (per siswa, bukan
+            per bulan yang lagi ditampilkan). */}
+        <div className="ml-auto">
+          <CetakRiwayatSiswaDialog sekolah={sekolahInfo} />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
