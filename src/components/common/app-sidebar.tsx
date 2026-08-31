@@ -25,10 +25,12 @@ import {
   ShieldCheck,
   Crown,
   MoreHorizontal,
-  // KeyRound, // uncomment jika fitur ganti password diaktifkan
   LogOut,
   History,
   KeyRound,
+  Eye,
+  EyeOff,
+  Loader2,
 } from "lucide-react";
 import {
   Dialog,
@@ -40,6 +42,8 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -58,7 +62,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  // DropdownMenuSeparator, // uncomment jika fitur ganti password diaktifkan
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
@@ -116,6 +119,49 @@ export default function AppSidebar() {
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
+  // ── State & handler untuk dialog Ganti Password (bukan redirect halaman) ──
+  const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [isSavingPassword, setIsSavingPassword] = useState(false);
+
+  const resetPasswordDialogState = () => {
+    setNewPassword("");
+    setConfirmPassword("");
+    setShowPassword(false);
+    setShowConfirm(false);
+  };
+
+  const handleGantiPassword = () => {
+    setShowPasswordDialog(true);
+  };
+
+  const handleSubmitGantiPassword = async () => {
+    if (newPassword.length < 6) {
+      toast.error("Password minimal 6 karakter");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error("Konfirmasi password tidak cocok");
+      return;
+    }
+
+    setIsSavingPassword(true);
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    setIsSavingPassword(false);
+
+    if (error) {
+      toast.error("Gagal mengubah password", { description: error.message });
+      return;
+    }
+
+    toast.success("Password berhasil diubah");
+    setShowPasswordDialog(false);
+    resetPasswordDialogState();
+  };
+
   const handleLogout = async () => {
     setIsLoggingOut(true);
     await supabase.auth.signOut();
@@ -123,10 +169,6 @@ export default function AppSidebar() {
       "user_profile=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
     toast.success("Berhasil logout");
     router.push("/login");
-  };
-
-  const handleGantiPassword = () => {
-    router.push("/reset-password");
   };
 
   const isSuperadmin = profile?.role === "superadmin";
@@ -299,11 +341,11 @@ export default function AppSidebar() {
             {/* Nama & Role */}
             <div className="flex-1 min-w-0">
               <p className="text-xs font-semibold truncate leading-tight">
-{isSiswa
+                {isSiswa
                   ? (profile as any)?.children?.find((c: any) => c.id === (profile as any).activeSiswaId)?.namaSiswa
                     ?? profile?.name
-                  : profile?.name || "Pengguna"}    
-                            </p>
+                  : profile?.name || "Pengguna"}
+              </p>
               <p className={cn("text-xs font-medium leading-tight", roleColor)}>
                 {isSuperadmin
                   ? "Superadmin"
@@ -326,7 +368,6 @@ export default function AppSidebar() {
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="top" align="end" className="w-40 mb-1">
-          
                 <DropdownMenuItem
                   onClick={handleGantiPassword}
                   className="cursor-pointer gap-2"
@@ -335,7 +376,7 @@ export default function AppSidebar() {
                   Ganti Password
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                
+
                 {isSiswa && (profile as any)?.children?.length > 1 && (
                   <DropdownMenuItem
                     onClick={() => router.push("/siswa/pilih-anak")}
@@ -400,6 +441,103 @@ export default function AppSidebar() {
                   <LogOut className="w-4 h-4" />
                   Ya, Keluar
                 </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog Ganti Password (popup, tidak pindah halaman) */}
+      <Dialog
+        open={showPasswordDialog}
+        onOpenChange={(open) => {
+          if (!isSavingPassword) {
+            setShowPasswordDialog(open);
+            if (!open) resetPasswordDialogState();
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[380px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="w-5 h-5 text-green-600" />
+              Ganti Password
+            </DialogTitle>
+            <DialogDescription>
+              Masukkan password baru Anda (minimal 6 karakter)
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Password Baru</Label>
+              <div className="relative">
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  placeholder="••••••••"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  disabled={isSavingPassword}
+                />
+                <button
+                  type="button"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={() => setShowPassword(!showPassword)}
+                >
+                  {showPassword ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Konfirmasi Password</Label>
+              <div className="relative">
+                <Input
+                  type={showConfirm ? "text" : "password"}
+                  placeholder="••••••••"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  disabled={isSavingPassword}
+                />
+                <button
+                  type="button"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={() => setShowConfirm(!showConfirm)}
+                >
+                  {showConfirm ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                </button>
+              </div>
+              {confirmPassword && newPassword !== confirmPassword && (
+                <p className="text-xs text-red-500">Password tidak cocok</p>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 mt-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowPasswordDialog(false)}
+              disabled={isSavingPassword}
+            >
+              Batal
+            </Button>
+            <Button
+              onClick={handleSubmitGantiPassword}
+              disabled={
+                isSavingPassword ||
+                !newPassword ||
+                !confirmPassword ||
+                newPassword !== confirmPassword
+              }
+              className="bg-green-600 hover:bg-green-700 gap-2"
+            >
+              {isSavingPassword ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Menyimpan...
+                </>
+              ) : (
+                "Simpan"
               )}
             </Button>
           </DialogFooter>
