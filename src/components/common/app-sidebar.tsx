@@ -28,6 +28,7 @@ import {
   // KeyRound, // uncomment jika fitur ganti password diaktifkan
   LogOut,
   History,
+  KeyRound,
 } from "lucide-react";
 import {
   Dialog,
@@ -56,6 +57,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   // DropdownMenuSeparator, // uncomment jika fitur ganti password diaktifkan
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -123,10 +125,9 @@ export default function AppSidebar() {
     router.push("/login");
   };
 
-  // Uncomment jika fitur ganti password diaktifkan
-  // const handleGantiPassword = () => {
-  //   router.push("/ganti-password");
-  // };
+  const handleGantiPassword = () => {
+    router.push("/ganti-password");
+  };
 
   const isSuperadmin = profile?.role === "superadmin";
   const isAdmin = profile?.role === "admin";
@@ -325,7 +326,7 @@ export default function AppSidebar() {
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="top" align="end" className="w-40 mb-1">
-                {/* Menu ganti password — uncomment jika fitur sudah diaktifkan
+          
                 <DropdownMenuItem
                   onClick={handleGantiPassword}
                   className="cursor-pointer gap-2"
@@ -334,7 +335,7 @@ export default function AppSidebar() {
                   Ganti Password
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                */}
+                
                 {isSiswa && (profile as any)?.children?.length > 1 && (
                   <DropdownMenuItem
                     onClick={() => router.push("/siswa/pilih-anak")}
