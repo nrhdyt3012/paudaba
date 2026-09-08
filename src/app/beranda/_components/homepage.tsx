@@ -440,7 +440,7 @@ export default function Homepage() {
     {
       icon: <Phone className="w-8 h-8 text-teal-500" />,
       title: "Telepon / WhatsApp",
-      content: ["Ust. Aminah", "0815 5336 6321"],
+      content: ["Ust. Yuni", "0813 3126 0890 (WhatsApp)"],
     },
     {
       icon: <Instagram className="w-8 h-8 text-teal-500" />,
@@ -559,14 +559,14 @@ export default function Homepage() {
                 </div>
                 <div className="text-center mt-6">
                   <h3 className="text-2xl font-bold text-gray-800 dark:text-gray-100">
-                    Ust. Aminah
+                    Kepala Sekolah
                   </h3>
-                  <p className="text-teal-600 dark:text-teal-400">
+                  {/* <p className="text-teal-600 dark:text-teal-400">
                     Kepala Sekolah
                   </p>
                   <p className="text-gray-600 dark:text-gray-400 mt-2">
-                    0815 5336 6321
-                  </p>
+                    0813 3126 0890 (WhatsApp)
+                  </p> */}
                 </div>
               </div>
             </div>
@@ -910,7 +910,7 @@ export default function Homepage() {
                   </p>
 
                   <a
-                    href="https://wa.me/6281553366321"
+                    href="https://wa.me/6281331260890"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -921,7 +921,7 @@ export default function Homepage() {
                   </a>
 
                   <p className="text-xs text-gray-500">
-                    Ust. Aminah - 0815 5336 6321
+                    Ust. Yuni - 0813-3126-0890
                   </p>
                 </div>
               </CardContent>
@@ -933,7 +933,7 @@ export default function Homepage() {
       {/* ======================================================= */}
       {/* SYARAT & KETENTUAN                                       */}
       {/* ======================================================= */}
-      <section
+      {/* <section
         id="syarat-ketentuan"
         className="py-16 px-6 bg-gradient-to-br from-slate-700 to-teal-600 text-white scroll-mt-8"
       >
@@ -966,7 +966,7 @@ export default function Homepage() {
           ))}
 
           {/* Kontak Pengaduan */}
-          <Card className="bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800">
+          {/* <Card className="bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800">
             <CardHeader>
               <CardTitle className="text-xl">
                 8. Kontak untuk Pertanyaan & Pengaduan
@@ -981,7 +981,7 @@ export default function Homepage() {
                 <li className="flex items-center gap-2">
                   <Phone className="w-5 h-5 text-teal-500 shrink-0" />
                   <span className="text-gray-700 dark:text-gray-300">
-                    Ust. Aminah &mdash; 0815 5336 6321 (WhatsApp)
+                    Ust. Yuni &mdash; 0813 3126 0890 (WhatsApp)
                   </span>
                 </li>
                 <li className="flex items-start gap-2">
@@ -994,7 +994,7 @@ export default function Homepage() {
             </CardContent>
           </Card>
         </div>
-      </section>
+      </section> */} 
 
       <Footer />
     </div>
