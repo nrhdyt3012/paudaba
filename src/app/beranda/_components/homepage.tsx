@@ -39,12 +39,19 @@ import {
   Instagram,
   Send,
   MessageCircle,
+  RotateCcw,
+  UserCheck,
+  ShieldCheck,
+  AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import Footer from "@/components/common/footer";
 import { useState } from "react";
 import { toast } from "sonner";
+
+const TERAKHIR_DIPERBARUI = "31 Agustus 2026";
 
 export default function Homepage() {
   /* ================= DATA: PROGRAM UNGGULAN (dipersingkat, 5 kartu) ================= */
@@ -227,6 +234,173 @@ export default function Homepage() {
         "UKS dengan obat-obatan dasar",
       ],
       image: "/logo.jpg",
+    },
+  ];
+
+  /* ================= DATA: SYARAT & KETENTUAN ================= */
+  const syaratKetentuan = [
+    {
+      id: "ruang-lingkup",
+      icon: <FileText className="w-8 h-8 text-teal-500" />,
+      title: "1. Ruang Lingkup",
+      body: (
+        <>
+          <p>
+            Syarat & Ketentuan ini mengatur penggunaan layanan administrasi
+            dan pembayaran yang disediakan oleh KB/TK &apos;Aisyiyah Bustanul
+            Athfal 1 Buduran (&quot;Sekolah&quot;) melalui sistem PAUDABA,
+            termasuk pendaftaran peserta didik baru (PPDB), pembayaran SPP
+            dan tagihan lainnya, serta layanan informasi terkait.
+          </p>
+          <p>
+            Dengan mengakses dan menggunakan layanan ini, Wali Siswa dianggap
+            telah membaca, memahami, dan menyetujui seluruh isi Syarat &
+            Ketentuan berikut.
+          </p>
+        </>
+      ),
+    },
+    {
+      id: "definisi",
+      icon: <UserCheck className="w-8 h-8 text-teal-500" />,
+      title: "2. Definisi",
+      body: (
+        <ul className="space-y-2 list-disc pl-5">
+          <li>
+            <b>Sekolah</b> adalah KB/TK &apos;Aisyiyah Bustanul Athfal 1
+            Buduran, penyedia layanan pendidikan anak usia dini.
+          </li>
+          <li>
+            <b>Wali Siswa</b> adalah orang tua/wali yang terdaftar dan
+            memiliki akun pada sistem untuk mengelola data serta pembayaran
+            siswa yang menjadi tanggungannya.
+          </li>
+          <li>
+            <b>Layanan</b> adalah seluruh fitur pada sistem PAUDABA, meliputi
+            informasi sekolah, pendaftaran siswa baru, tagihan, dan
+            pembayaran daring maupun manual.
+          </li>
+          <li>
+            <b>Mitra Pembayaran</b> adalah penyedia jasa payment gateway
+            (Midtrans) yang memproses transaksi pembayaran daring pada
+            sistem ini.
+          </li>
+        </ul>
+      ),
+    },
+    {
+      id: "akun",
+      icon: <ShieldCheck className="w-8 h-8 text-teal-500" />,
+      title: "3. Pendaftaran & Akun Pengguna",
+      body: (
+        <ul className="space-y-2 list-disc pl-5">
+          <li>
+            Akun Wali Siswa dibuat oleh pihak Sekolah pada saat siswa
+            terdaftar, atau melalui proses pendaftaran peserta didik baru
+            (PPDB).
+          </li>
+          <li>
+            Wali Siswa bertanggung jawab menjaga kerahasiaan email dan
+            password akun, serta segera mengganti password apabila dicurigai
+            terjadi penyalahgunaan.
+          </li>
+          <li>
+            Satu akun Wali Siswa dapat menaungi lebih dari satu data siswa
+            apabila memiliki lebih dari satu anak yang terdaftar di Sekolah
+            yang sama.
+          </li>
+        </ul>
+      ),
+    },
+    {
+      id: "pembayaran",
+      icon: <DollarSign className="w-8 h-8 text-teal-500" />,
+      title: "4. Ketentuan Pembayaran",
+      body: (
+        <ul className="space-y-2 list-disc pl-5">
+          <li>
+            Seluruh transaksi pada sistem ini menggunakan mata uang Rupiah
+            (Rp).
+          </li>
+          <li>
+            Pembayaran dapat dilakukan secara daring melalui Midtrans (kartu
+            debit/kredit, Virtual Account bank, e-wallet, dan QRIS), atau
+            secara manual (tunai/transfer bank) yang dicatat langsung oleh
+            Bendahara.
+          </li>
+          <li>
+            Halaman pembayaran daring diproses melalui jendela pembayaran
+            resmi Midtrans yang terintegrasi langsung pada sistem ini, dan
+            tidak akan mengarahkan Wali Siswa ke situs pihak ketiga yang
+            tidak dikenal.
+          </li>
+          <li>
+            Bukti pembayaran/kwitansi dapat diunduh melalui menu Riwayat
+            pada akun Wali Siswa setelah pembayaran dikonfirmasi.
+          </li>
+        </ul>
+      ),
+    },
+    {
+      id: "pengembalian-dana",
+      icon: <RotateCcw className="w-8 h-8 text-teal-500" />,
+      title: "5. Kebijakan Pengembalian Dana (Refund)",
+      body: (
+        <>
+          <p className="mb-3">
+            Sekolah berupaya memastikan setiap transaksi berjalan dengan
+            benar. Apabila terjadi kekeliruan, pengembalian dana dapat
+            diajukan dengan ketentuan berikut.
+          </p>
+          <p className="font-semibold mt-4 mb-1">
+            Dapat diajukan pengembalian dana apabila:
+          </p>
+          <ul className="space-y-2 list-disc pl-5">
+            <li>Terjadi kelebihan bayar atau pembayaran ganda (double payment) atas tagihan yang sama.</li>
+            <li>Terjadi kesalahan sistem yang mengakibatkan dana terdebet namun tagihan tidak tercatat lunas.</li>
+            <li>Pembatalan pendaftaran PPDB yang diajukan sebelum tahun ajaran dimulai.</li>
+          </ul>
+          <p className="font-semibold mt-4 mb-1">
+            Tidak dapat diajukan pengembalian dana apabila:
+          </p>
+          <ul className="space-y-2 list-disc pl-5">
+            <li>Pembayaran SPP/biaya lain untuk periode yang layanannya telah/sedang berlangsung.</li>
+            <li>Pengunduran diri siswa setelah tahun ajaran berjalan, kecuali disepakati lain secara tertulis dengan Sekolah.</li>
+          </ul>
+          <p className="mt-4 text-sm">
+            Pengajuan dilakukan melalui Bendahara/kontak resmi Sekolah
+            disertai bukti pembayaran; permohonan diverifikasi maksimal 7
+            hari kerja, dan dana dikembalikan maksimal 14 hari kerja setelah
+            disetujui.
+          </p>
+        </>
+      ),
+    },
+    {
+      id: "hak-kewajiban",
+      icon: <AlertTriangle className="w-8 h-8 text-teal-500" />,
+      title: "6. Hak & Kewajiban Pengguna",
+      body: (
+        <ul className="space-y-2 list-disc pl-5">
+          <li>Wali Siswa berhak memperoleh informasi tagihan dan riwayat pembayaran yang akurat dan dapat diakses kapan saja.</li>
+          <li>Wali Siswa wajib melakukan pembayaran sesuai nominal dan periode tagihan yang berlaku.</li>
+          <li>Wali Siswa dilarang menyalahgunakan sistem, termasuk mencoba mengakses akun pengguna lain.</li>
+        </ul>
+      ),
+    },
+    {
+      id: "perubahan",
+      icon: <RefreshCw className="w-8 h-8 text-teal-500" />,
+      title: "7. Perubahan Ketentuan",
+      body: (
+        <p>
+          Sekolah dapat memperbarui Syarat & Ketentuan ini dari waktu ke
+          waktu. Perubahan akan diinformasikan melalui halaman ini dengan
+          mencantumkan tanggal pembaruan terbaru. Penggunaan layanan setelah
+          perubahan berlaku dianggap sebagai persetujuan atas ketentuan yang
+          telah diperbarui.
+        </p>
+      ),
     },
   ];
 
@@ -688,78 +862,139 @@ export default function Homepage() {
       </section>
 
       {/* Contact Form & Map & WhatsApp */}
-<section className="py-20 px-6 bg-gradient-to-br from-teal-50 to-blue-50 dark:from-gray-900 dark:to-gray-800">
-  <div className="container mx-auto max-w-6xl">
+      <section className="py-20 px-6 bg-gradient-to-br from-teal-50 to-blue-50 dark:from-gray-900 dark:to-gray-800">
+        <div className="container mx-auto max-w-6xl">
+          {/* Map & WhatsApp */}
+          <div className="grid md:grid-cols-2 gap-8">
+            {/* Maps */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-2xl">Lokasi Kami</CardTitle>
+              </CardHeader>
 
-    {/* Map & WhatsApp */}
-    <div className="grid md:grid-cols-2 gap-8">
+              <CardContent>
+                <div className="aspect-video rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-700">
+                  <iframe
+                    src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3957.2!2d112.7!3d-7.4!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zN8KwMjQnMDAuMCJTIDExMsKwNDInMDAuMCJF!5e0!3m2!1sen!2sid!4v1234567890"
+                    width="100%"
+                    height="100%"
+                    style={{ border: 0 }}
+                    allowFullScreen
+                    loading="lazy"
+                    referrerPolicy="no-referrer-when-downgrade"
+                    title="Lokasi KB TK Aisyiyah Bustanul Athfal 1 Buduran"
+                  />
+                </div>
 
-      {/* Maps */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-2xl">Lokasi Kami</CardTitle>
-        </CardHeader>
+                <div className="mt-4 space-y-2">
+                  <h4 className="font-semibold">Alamat Lengkap:</h4>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Jl. Kavling Persada Asri C-37, Damarsi, Buduran, Sidoarjo,
+                    Jawa Timur
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
 
-        <CardContent>
-          <div className="aspect-video rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-700">
-            <iframe
-              src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3957.2!2d112.7!3d-7.4!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zN8KwMjQnMDAuMCJTIDExMsKwNDInMDAuMCJF!5e0!3m2!1sen!2sid!4v1234567890"
-              width="100%"
-              height="100%"
-              style={{ border: 0 }}
-              allowFullScreen
-              loading="lazy"
-              referrerPolicy="no-referrer-when-downgrade"
-              title="Lokasi KB TK Aisyiyah Bustanul Athfal 1 Buduran"
-            />
+            {/* WhatsApp Quick Contact */}
+            <Card className="bg-gradient-to-br from-green-50 to-teal-50 dark:from-green-950 dark:to-teal-950">
+              <CardContent className="p-6">
+                <div className="text-center space-y-4">
+                  <MessageCircle className="w-16 h-16 mx-auto text-green-600" />
+
+                  <h3 className="text-xl font-bold">Hubungi Via WhatsApp</h3>
+
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Butuh informasi cepat? Chat langsung dengan kami melalui
+                    WhatsApp
+                  </p>
+
+                  <a
+                    href="https://wa.me/6281553366321"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <Button className="w-full bg-green-600 hover:bg-green-700">
+                      <MessageCircle className="w-4 h-4 mr-2" />
+                      Chat WhatsApp
+                    </Button>
+                  </a>
+
+                  <p className="text-xs text-gray-500">
+                    Ust. Aminah - 0815 5336 6321
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
           </div>
+        </div>
+      </section>
 
-          <div className="mt-4 space-y-2">
-            <h4 className="font-semibold">Alamat Lengkap:</h4>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              Jl. Kavling Persada Asri C-37, Damarsi, Buduran,
-              Sidoarjo, Jawa Timur
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+      {/* ======================================================= */}
+      {/* SYARAT & KETENTUAN                                       */}
+      {/* ======================================================= */}
+      <section
+        id="syarat-ketentuan"
+        className="py-16 px-6 bg-gradient-to-br from-slate-700 to-teal-600 text-white scroll-mt-8"
+      >
+        <div className="container mx-auto text-center">
+          <FileText className="w-14 h-14 mx-auto mb-4" />
+          <h2 className="text-5xl font-bold mb-4">Syarat & Ketentuan</h2>
+          <p className="text-xl max-w-2xl mx-auto">
+            Serta kebijakan pengembalian dana layanan PAUDABA
+          </p>
+          <p className="text-sm mt-4 text-teal-50">
+            Terakhir diperbarui: {TERAKHIR_DIPERBARUI}
+          </p>
+        </div>
+      </section>
 
-      {/* WhatsApp Quick Contact */}
-      <Card className="bg-gradient-to-br from-green-50 to-teal-50 dark:from-green-950 dark:to-teal-950">
-        <CardContent className="p-6">
-          <div className="text-center space-y-4">
-            <MessageCircle className="w-16 h-16 mx-auto text-green-600" />
+      <section className="py-20 px-6 bg-white dark:bg-gray-800">
+        <div className="container mx-auto max-w-3xl space-y-6">
+          {syaratKetentuan.map((s) => (
+            <Card key={s.id} id={s.id} className="scroll-mt-8">
+              <CardHeader>
+                <div className="flex items-center gap-4">
+                  {s.icon}
+                  <CardTitle className="text-xl">{s.title}</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent className="text-gray-700 dark:text-gray-300 leading-relaxed">
+                {s.body}
+              </CardContent>
+            </Card>
+          ))}
 
-            <h3 className="text-xl font-bold">
-              Hubungi Via WhatsApp
-            </h3>
-
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              Butuh informasi cepat? Chat langsung dengan kami melalui
-              WhatsApp
-            </p>
-
-            <a
-              href="https://wa.me/6281553366321"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <Button className="w-full bg-green-600 hover:bg-green-700">
-                <MessageCircle className="w-4 h-4 mr-2" />
-                Chat WhatsApp
-              </Button>
-            </a>
-
-            <p className="text-xs text-gray-500">
-              Ust. Aminah - 0815 5336 6321
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-    </div>
-  </div>
-</section>
+          {/* Kontak Pengaduan */}
+          <Card className="bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800">
+            <CardHeader>
+              <CardTitle className="text-xl">
+                8. Kontak untuk Pertanyaan & Pengaduan
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-gray-700 dark:text-gray-300 mb-4">
+                Pertanyaan seputar Syarat & Ketentuan ini, termasuk
+                pengajuan pengembalian dana, dapat disampaikan melalui:
+              </p>
+              <ul className="space-y-3 text-sm">
+                <li className="flex items-center gap-2">
+                  <Phone className="w-5 h-5 text-teal-500 shrink-0" />
+                  <span className="text-gray-700 dark:text-gray-300">
+                    Ust. Aminah &mdash; 0815 5336 6321 (WhatsApp)
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <MapPin className="w-5 h-5 text-teal-500 shrink-0 mt-0.5" />
+                  <span className="text-gray-700 dark:text-gray-300">
+                    Jl. Kavling Persada Asri C-37, Damarsi, Buduran, Sidoarjo
+                  </span>
+                </li>
+              </ul>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
 
       <Footer />
     </div>

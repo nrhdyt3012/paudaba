@@ -39,7 +39,7 @@ export default function Footer() {
             <ul className="space-y-2 text-sm">
               <li>
                 <Link
-                  href="/profil"
+                  href="/#profil"
                   className="text-gray-400 hover:text-teal-400 transition-colors"
                 >
                   Profil
@@ -47,7 +47,7 @@ export default function Footer() {
               </li>
               <li>
                 <Link
-                  href="/fasilitas"
+                  href="/#fasilitas"
                   className="text-gray-400 hover:text-teal-400 transition-colors"
                 >
                   Fasilitas
@@ -71,10 +71,18 @@ export default function Footer() {
               </li>
               <li>
                 <Link
-                  href="/kontak"
+                  href="/#kontak"
                   className="text-gray-400 hover:text-teal-400 transition-colors"
                 >
                   Kontak
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/#syarat-ketentuan"
+                  className="text-gray-400 hover:text-teal-400 transition-colors"
+                >
+                  Syarat & Ketentuan
                 </Link>
               </li>
             </ul>
