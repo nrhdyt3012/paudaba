@@ -101,12 +101,7 @@ export const importUserSchema = z.object({
 });
 
 export type LoginForm = z.infer<typeof loginSchemaForm>;
-// FIX: pakai z.input (bukan z.infer/z.output) — field yang punya .default()
-// seperti `tipe_spp` dan `role` jadi tetap OPSIONAL di tipe form, sesuai
-// yang diharapkan react-hook-form's zodResolver (yang mem-validasi input
-// SEBELUM default diterapkan). Kalau pakai z.infer/z.output, field itu
-// jadi wajib-ada di tipe form padahal resolver mengizinkannya kosong —
-// itu penyebab error TS "Resolver<...> is not assignable to..." kemarin.
+
 export type CreateUserForm = z.input<typeof createUserSchema>;
 export type UpdateUserForm = z.input<typeof updateUserSchema>;
 export type ImportUserForm = z.infer<typeof importUserSchema>;
