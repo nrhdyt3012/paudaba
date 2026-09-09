@@ -23,12 +23,15 @@ export default function DialogCreateMenu({ refetch }: { refetch: () => void }) {
     // Generate namaTagihan otomatis dari pilihan user
     const { namaTagihan, dbJenisTagihan } = generateNamaTagihan({
       jenisTagihan: data.jenisTagihan,
+      gelombangPPDB: data.gelombangPPDB,
+      tahunPPDB: data.tahunPPDB,
       tipeSPP: data.tipeSPP,
       semesterDaftarUlang: data.semesterDaftarUlang,
       tahunDaftarUlang: data.tahunDaftarUlang,
       bulanSPP: data.bulanSPP,
       tahunSPP: data.tahunSPP,
       semesterSPP: data.semesterSPP,
+      namaTagihanManual: data.namaTagihanManual,
       jenjang: data.jenjang,
     });
 

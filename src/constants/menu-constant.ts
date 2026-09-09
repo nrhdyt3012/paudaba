@@ -1,10 +1,4 @@
 // src/constants/menu-constant.ts
-// FIX: kolom "Jenis Tagihan" dihapus dari tabel — sudah otomatis "terbaca"
-// lewat Nama Tagihan yang di-generate (mis. "SPP Bulanan TK A ... Reguler"
-// sudah menyebutkan jenisnya di dalam namanya sendiri), jadi kolom
-// terpisah untuk itu redundan. Kolom "Keterangan" ditambahkan (sebelumnya
-// datanya ada tapi cuma nongol sebagai subtext kecil di bawah nama, sekarang
-// jadi kolom sendiri biar jelas kebaca).
 export const HEADER_TABLE_MENU = [
   "No",
   "Nama Tagihan",
@@ -16,6 +10,9 @@ export const HEADER_TABLE_MENU = [
 
 export const INITIAL_MENU = {
   jenisTagihan: "",
+  // PPDB fields
+  gelombangPPDB: "",
+  tahunPPDB: "",
   // Daftar Ulang fields
   semesterDaftarUlang: "",
   tahunDaftarUlang: "",
@@ -24,6 +21,8 @@ export const INITIAL_MENU = {
   bulanSPP: "",          // only for Bulanan
   tahunSPP: "",
   semesterSPP: "",       // only for Semesteran
+  // Lainnya fields
+  namaTagihanManual: "",
   // Common fields
   jenjang: "",
   nominal: "",
@@ -49,12 +48,19 @@ export const JENJANG_LIST = [
   { value: "TK B", label: "TK B" },
 ];
 
-// Jenis tagihan utama (pilihan pertama di form)
+// FIX: tambah opsi "Lainnya" untuk tagihan bebas (nama diketik manual)
 export const JENIS_TAGIHAN_LIST = [
   { value: "PPDB", label: "PPDB" },
   { value: "Daftar Ulang", label: "Daftar Ulang" },
   { value: "SPP Reguler", label: "SPP Reguler" },
   { value: "SPP Subsidi", label: "SPP Subsidi" },
+  { value: "Lainnya", label: "Lainnya" },
+];
+
+// FIX: opsi gelombang PPDB
+export const GELOMBANG_LIST = [
+  { value: "1", label: "Gelombang 1" },
+  { value: "2", label: "Gelombang 2" },
 ];
 
 export const SEMESTER_LIST = [
@@ -82,7 +88,6 @@ export const BULAN_LIST = [
   { value: "12", label: "Desember" },
 ];
 
-// Generate daftar tahun (5 tahun ke belakang s.d. 5 tahun ke depan)
 export const TAHUN_LIST = (() => {
   const currentYear = new Date().getFullYear();
   return Array.from({ length: 11 }, (_, i) => {
@@ -97,20 +102,27 @@ export const TAHUN_LIST = (() => {
  */
 export function generateNamaTagihan(values: {
   jenisTagihan: string;
+  gelombangPPDB?: string;
+  tahunPPDB?: string;
   tipeSPP?: string;
   semesterDaftarUlang?: string;
   tahunDaftarUlang?: string;
   bulanSPP?: string;
   tahunSPP?: string;
   semesterSPP?: string;
+  namaTagihanManual?: string;
   jenjang?: string;
 }): { namaTagihan: string; dbJenisTagihan: string } {
   const { jenisTagihan, jenjang } = values;
   const jenjangLabel = jenjang || "";
 
   if (jenisTagihan === "PPDB") {
+    // FIX: PPDB sekarang punya detail Gelombang + Tahun
+    const gelombang = values.gelombangPPDB || "";
+    const tahun = values.tahunPPDB || "";
+    const gelombangLabel = gelombang ? `Gelombang ${gelombang}` : "";
     return {
-      namaTagihan: `PPDB ${jenjangLabel}`.trim(),
+      namaTagihan: `PPDB ${jenjangLabel} ${gelombangLabel} ${tahun}`.trim(),
       dbJenisTagihan: "Reguler",
     };
   }
@@ -147,10 +159,17 @@ export function generateNamaTagihan(values: {
       };
     }
 
-    // Fallback sebelum tipeSPP dipilih
     return {
       namaTagihan: `SPP ${jenjangLabel} ${tipeLabel}`.trim(),
       dbJenisTagihan,
+    };
+  }
+
+  // FIX: "Lainnya" -> nama tagihan diketik manual oleh user, tidak di-generate
+  if (jenisTagihan === "Lainnya") {
+    return {
+      namaTagihan: (values.namaTagihanManual || "").trim(),
+      dbJenisTagihan: "Reguler",
     };
   }
 

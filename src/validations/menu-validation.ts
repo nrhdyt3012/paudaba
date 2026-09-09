@@ -5,6 +5,10 @@ export const menuFormSchema = z
   .object({
     jenisTagihan: z.string().min(1, "Jenis tagihan wajib dipilih"),
 
+    // PPDB
+    gelombangPPDB: z.string().optional(),
+    tahunPPDB: z.string().optional(),
+
     // Daftar Ulang
     semesterDaftarUlang: z.string().optional(),
     tahunDaftarUlang: z.string().optional(),
@@ -15,20 +19,41 @@ export const menuFormSchema = z
     tahunSPP: z.string().optional(),
     semesterSPP: z.string().optional(),
 
+    // Lainnya
+    namaTagihanManual: z.string().optional(),
+
     // Common
     jenjang: z.string().min(1, "Jenjang wajib dipilih"),
     nominal: z
-  .string()
-  .min(1, "Nominal wajib diisi")
-  .refine((val) => /^\d+$/.test(val), {
-    message: "Nominal harus berupa angka",
-  })
-  .refine((val) => Number(val) > 1000, {
-    message: "Nominal harus lebih dari 1000",
-  }),
+      .string()
+      .min(1, "Nominal wajib diisi")
+      .refine((val) => /^\d+$/.test(val), {
+        message: "Nominal harus berupa angka",
+      })
+      .refine((val) => Number(val) > 1000, {
+        message: "Nominal harus lebih dari 1000",
+      }),
     description: z.string().optional(),
   })
   .superRefine((data, ctx) => {
+    // FIX: validasi field Gelombang + Tahun untuk PPDB
+    if (data.jenisTagihan === "PPDB") {
+      if (!data.gelombangPPDB) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Gelombang wajib dipilih",
+          path: ["gelombangPPDB"],
+        });
+      }
+      if (!data.tahunPPDB) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Tahun wajib dipilih",
+          path: ["tahunPPDB"],
+        });
+      }
+    }
+
     if (data.jenisTagihan === "Daftar Ulang") {
       if (!data.semesterDaftarUlang) {
         ctx.addIssue({
@@ -88,6 +113,17 @@ export const menuFormSchema = z
             path: ["tahunSPP"],
           });
         }
+      }
+    }
+
+    // FIX: validasi nama manual untuk jenis "Lainnya"
+    if (data.jenisTagihan === "Lainnya") {
+      if (!data.namaTagihanManual || !data.namaTagihanManual.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Nama tagihan wajib diisi",
+          path: ["namaTagihanManual"],
+        });
       }
     }
   });

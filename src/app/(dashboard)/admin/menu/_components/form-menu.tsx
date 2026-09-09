@@ -16,6 +16,7 @@ import {
 import { Form } from "@/components/ui/form";
 import {
   BULAN_LIST,
+  GELOMBANG_LIST,
   JENJANG_LIST,
   JENIS_TAGIHAN_LIST,
   SEMESTER_LIST,
@@ -46,29 +47,37 @@ export default function FormMenu({
   const isSPP =
     jenisTagihan === "SPP Reguler" || jenisTagihan === "SPP Subsidi";
   const isDaftarUlang = jenisTagihan === "Daftar Ulang";
+  const isPPDB = jenisTagihan === "PPDB";
+  const isLainnya = jenisTagihan === "Lainnya";
   const showField2 = isDaftarUlang || isSPP;
 
   // Preview nama tagihan yang akan di-generate
   const allValues = useWatch({ control: form.control });
   const { namaTagihan: previewNama } = generateNamaTagihan({
     jenisTagihan: allValues.jenisTagihan || "",
+    gelombangPPDB: allValues.gelombangPPDB,
+    tahunPPDB: allValues.tahunPPDB,
     tipeSPP: allValues.tipeSPP,
     semesterDaftarUlang: allValues.semesterDaftarUlang,
     tahunDaftarUlang: allValues.tahunDaftarUlang,
     bulanSPP: allValues.bulanSPP,
     tahunSPP: allValues.tahunSPP,
     semesterSPP: allValues.semesterSPP,
+    namaTagihanManual: allValues.namaTagihanManual,
     jenjang: allValues.jenjang,
   });
 
   // Reset field turunan saat jenis tagihan berubah
   const handleJenisTagihanChange = () => {
+    form.setValue("gelombangPPDB", "");
+    form.setValue("tahunPPDB", "");
     form.setValue("semesterDaftarUlang", "");
     form.setValue("tahunDaftarUlang", "");
     form.setValue("tipeSPP", "");
     form.setValue("bulanSPP", "");
     form.setValue("tahunSPP", "");
     form.setValue("semesterSPP", "");
+    form.setValue("namaTagihanManual", "");
   };
 
   // Reset field bulanan/semesteran saat tipe SPP berubah
@@ -105,6 +114,27 @@ export default function FormMenu({
             </div>
 
             {/* ─── Field 2 (kondisional) ─── */}
+
+            {/* PPDB → Gelombang + Tahun */}
+            {isPPDB && (
+              <div className="space-y-3 rounded-lg border border-dashed border-muted-foreground/40 p-3 bg-muted/20">
+                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
+                  Detail PPDB
+                </p>
+                <FormSelect
+                  form={form}
+                  name="gelombangPPDB"
+                  label="Gelombang"
+                  selectItem={GELOMBANG_LIST}
+                />
+                <FormSelect
+                  form={form}
+                  name="tahunPPDB"
+                  label="Tahun"
+                  selectItem={TAHUN_LIST}
+                />
+              </div>
+            )}
 
             {/* Daftar Ulang → Semester + Tahun */}
             {isDaftarUlang && (
@@ -180,6 +210,22 @@ export default function FormMenu({
               </div>
             )}
 
+            {/* Lainnya → Nama Tagihan diketik manual */}
+            {isLainnya && (
+              <div className="space-y-3 rounded-lg border border-dashed border-muted-foreground/40 p-3 bg-muted/20">
+                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
+                  Detail Lainnya
+                </p>
+                <FormInput
+                  form={form}
+                  name="namaTagihanManual"
+                  label="Nama Tagihan"
+                  placeholder="Ketik nama tagihan"
+                  type="text"
+                />
+              </div>
+            )}
+
             {/* ─── Field 3: Jenjang ─── */}
             <FormSelect
               form={form}
@@ -206,8 +252,8 @@ export default function FormMenu({
               type="textarea"
             />
 
-            {/* ─── Preview nama tagihan ─── */}
-            {previewNama && (
+            {/* ─── Preview nama tagihan (disembunyikan untuk "Lainnya" karena sudah sama persis dengan input) ─── */}
+            {previewNama && !isLainnya && (
               <div className="rounded-md bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 px-3 py-2">
                 <p className="text-xs text-muted-foreground mb-0.5">
                   Nama tagihan yang akan disimpan:

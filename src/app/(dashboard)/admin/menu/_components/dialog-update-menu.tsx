@@ -23,11 +23,19 @@ function parseNamaTagihanToFormValues(
   const nama = namaTagihan || "";
 
   if (nama.startsWith("PPDB")) {
-    return { jenisTagihan: "PPDB" };
+    // FIX: parse Gelombang + Tahun dari nama tagihan PPDB
+    // (untuk data PPDB lama sebelum fitur ini ada, gelombang/tahun akan
+    // kosong dan user tinggal isi ulang saat edit)
+    const gelombangMatch = nama.match(/Gelombang\s+(\d+)/);
+    const tahunMatch = nama.match(/(\d{4})/);
+    return {
+      jenisTagihan: "PPDB",
+      gelombangPPDB: gelombangMatch?.[1] || "",
+      tahunPPDB: tahunMatch?.[1] || "",
+    };
   }
 
   if (nama.startsWith("Daftar Ulang")) {
-    // Format: "Daftar Ulang {jenjang} Semester {semester} {tahun}"
     const semesterMatch = nama.match(/Semester\s+(Ganjil|Genap)/);
     const tahunMatch = nama.match(/(\d{4})/);
     return {
@@ -38,7 +46,6 @@ function parseNamaTagihanToFormValues(
   }
 
   if (nama.startsWith("SPP Semesteran")) {
-    // Format: "SPP Semesteran {jenjang} Semester {semester} {tahun} {Reguler|Subsidi}"
     const semesterMatch = nama.match(/Semester\s+(Ganjil|Genap)/);
     const tahunMatch = nama.match(/(\d{4})/);
     const jenis = jenisTagihanDB === "Subsidi" ? "SPP Subsidi" : "SPP Reguler";
@@ -51,7 +58,6 @@ function parseNamaTagihanToFormValues(
   }
 
   if (nama.startsWith("SPP Bulanan")) {
-    // Format: "SPP Bulanan {jenjang} {bulanNama} {tahun} {Reguler|Subsidi}"
     const BULAN_MAP: Record<string, string> = {
       Januari: "1", Februari: "2", Maret: "3", April: "4",
       Mei: "5", Juni: "6", Juli: "7", Agustus: "8",
@@ -71,9 +77,11 @@ function parseNamaTagihanToFormValues(
     };
   }
 
-  // Fallback: nama tidak dikenali, isi jenisTagihan berdasarkan DB value
+  // FIX: nama tidak match pola manapun -> perlakukan sebagai "Lainnya"
+  // (nama tagihan yang sebelumnya diketik manual atau tidak beraturan)
   return {
-    jenisTagihan: jenisTagihanDB === "Subsidi" ? "SPP Subsidi" : "SPP Reguler",
+    jenisTagihan: "Lainnya",
+    namaTagihanManual: nama,
   };
 }
 
@@ -92,15 +100,17 @@ export default function DialogUpdateMenu({
   const [state, action, isPending] = useActionState(updateMenu, INITIAL_STATE_MENU);
 
   const onSubmit = form.handleSubmit((data) => {
-    // Generate namaTagihan otomatis dari pilihan user
     const { namaTagihan, dbJenisTagihan } = generateNamaTagihan({
       jenisTagihan: data.jenisTagihan,
+      gelombangPPDB: data.gelombangPPDB,
+      tahunPPDB: data.tahunPPDB,
       tipeSPP: data.tipeSPP,
       semesterDaftarUlang: data.semesterDaftarUlang,
       tahunDaftarUlang: data.tahunDaftarUlang,
       bulanSPP: data.bulanSPP,
       tahunSPP: data.tahunSPP,
       semesterSPP: data.semesterSPP,
+      namaTagihanManual: data.namaTagihanManual,
       jenjang: data.jenjang,
     });
 
@@ -129,7 +139,6 @@ export default function DialogUpdateMenu({
 
   useEffect(() => {
     if (currentData) {
-      // Parse namatagihan yang tersimpan ke field-field form
       const parsed = parseNamaTagihanToFormValues(
         currentData.namaTagihan || "",
         currentData.jenisTagihan || ""
@@ -137,12 +146,15 @@ export default function DialogUpdateMenu({
 
       form.reset({
         jenisTagihan: parsed.jenisTagihan || "",
+        gelombangPPDB: parsed.gelombangPPDB || "",
+        tahunPPDB: parsed.tahunPPDB || "",
         semesterDaftarUlang: parsed.semesterDaftarUlang || "",
         tahunDaftarUlang: parsed.tahunDaftarUlang || "",
         tipeSPP: parsed.tipeSPP || "",
         bulanSPP: parsed.bulanSPP || "",
         tahunSPP: parsed.tahunSPP || "",
         semesterSPP: parsed.semesterSPP || "",
+        namaTagihanManual: parsed.namaTagihanManual || "",
         jenjang: currentData.jenjang || "",
         nominal: currentData.nominal?.toString() || "",
         description: currentData.description || "",
