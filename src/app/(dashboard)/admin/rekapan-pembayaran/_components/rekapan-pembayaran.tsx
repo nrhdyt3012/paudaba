@@ -22,9 +22,12 @@ import {
   Printer,
   FileStack,
   Search,
+  Infinity as InfinityIcon,
+  History,
 } from "lucide-react";
 import { useMemo, useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 import {
   BarChart,
   Bar,
@@ -70,6 +73,9 @@ const BULAN_SINGKAT = [
 const COLOR_ACTIVE = "#16a34a";
 const COLOR_INACTIVE = "#86efac";
 
+// BARU: ukuran halaman untuk pagination tabel transaksi
+const PAGE_SIZE = 15;
+
 const first = (v: any) => (Array.isArray(v) ? v[0] : v);
 
 // ─── Custom Tooltip ────────────────────────────────────────────────────────────
@@ -110,15 +116,22 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 // ─── Month-Year Picker ─────────────────────────────────────────────────────────
+// Opsi "Semua Waktu" di bagian atas panel, di luar grid bulan, supaya
+// bendahara/superadmin bisa lihat rekapan menyeluruh (bukan cuma per
+// bulan) — berguna terutama setelah impor data historis.
 const MonthYearPicker = ({
   selectedMonth,
   selectedYear,
+  isAllTime,
   onChange,
+  onSelectAllTime,
   onClose,
 }: {
   selectedMonth: number;
   selectedYear: number;
+  isAllTime: boolean;
   onChange: (month: number, year: number) => void;
+  onSelectAllTime: () => void;
   onClose: () => void;
 }) => {
   const [pickerYear, setPickerYear] = useState(selectedYear);
@@ -126,6 +139,18 @@ const MonthYearPicker = ({
 
   return (
     <div className="absolute z-50 top-full mt-2 left-1/2 -translate-x-1/2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-4 w-72">
+      <button
+        onClick={() => { onSelectAllTime(); onClose(); }}
+        className={`w-full mb-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+          isAllTime
+            ? "bg-green-600 text-white shadow-sm"
+            : "bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900"
+        }`}
+      >
+        <InfinityIcon className="h-3.5 w-3.5" />
+        Semua Waktu
+      </button>
+
       <div className="flex items-center justify-between mb-4">
         <button
           onClick={() => setPickerYear((y) => y - 1)}
@@ -145,7 +170,7 @@ const MonthYearPicker = ({
       <div className="grid grid-cols-3 gap-2">
         {BULAN_SINGKAT.slice(1).map((nama, idx) => {
           const bulanIdx = idx + 1;
-          const isActive = bulanIdx === selectedMonth && pickerYear === selectedYear;
+          const isActive = !isAllTime && bulanIdx === selectedMonth && pickerYear === selectedYear;
           return (
             <button
               key={bulanIdx}
@@ -289,11 +314,7 @@ function ActionMenuRekap({
   );
 }
 
-// ─── BARU: Dialog pencarian siswa + tombol cetak riwayat menyeluruh ───────────
-// Dipakai oleh bendahara/superadmin di menu Rekapan Pembayaran, supaya bisa
-// mencetak "Laporan Riwayat Pembayaran" per siswa (semua tagihan & transaksi,
-// bukan cuma bulan yang lagi dipilih) — persis seperti fitur yang sudah ada
-// di halaman Riwayat Pembayaran milik wali siswa.
+// ─── Dialog pencarian siswa + tombol cetak riwayat menyeluruh ───────────
 function CetakRiwayatSiswaDialog({
   sekolah,
 }: {
@@ -305,7 +326,6 @@ function CetakRiwayatSiswaDialog({
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [printTarget, setPrintTarget] = useState<{ siswaId: number; nama: string } | null>(null);
 
-  // Debounce input pencarian supaya tidak query ke Supabase setiap ketukan
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
     return () => clearTimeout(t);
@@ -403,8 +423,6 @@ function CetakRiwayatSiswaDialog({
         </DialogContent>
       </Dialog>
 
-      {/* Runner terpisah: fetch data lengkap siswa terpilih lalu langsung
-          trigger dialog print begitu data & konten siap. */}
       {printTarget && (
         <CetakRiwayatSiswaRunner
           key={printTarget.siswaId}
@@ -418,11 +436,6 @@ function CetakRiwayatSiswaDialog({
   );
 }
 
-// ─── BARU: fetch riwayat lengkap 1 siswa (semua tagihan + transaksi SUCCESS)
-// lalu langsung memicu dialog print begitu data siap. Query & susunan data
-// persis sama dengan halaman Riwayat Pembayaran milik wali siswa, supaya
-// hasil cetaknya identik — bedanya di sini idsiswa datang dari hasil
-// pencarian, bukan dari activeSiswaId di auth store.
 function CetakRiwayatSiswaRunner({
   siswaId,
   namaSiswa,
@@ -491,8 +504,6 @@ function CetakRiwayatSiswaRunner({
     },
   });
 
-  // Begitu data siswa & riwayat sudah siap dan konten hidden sudah sempat
-  // ter-render dengan data final, langsung buka dialog print browser.
   useEffect(() => {
     if (riwayatSelesai && siswaData && riwayatList && !hasPrinted.current) {
       hasPrinted.current = true;
@@ -507,8 +518,6 @@ function CetakRiwayatSiswaRunner({
 
   const now = new Date();
 
-  // Tabel: rangkum SEMUA transaksi dari SEMUA tagihan jadi satu list, urut
-  // kronologis (paling lama duluan) — persis seperti mutasi rekening.
   const allItems = (riwayatList as any[])
     .flatMap((tagihan) =>
       (tagihan.pembayaran ?? [])
@@ -590,11 +599,17 @@ function CetakRiwayatSiswaRunner({
 // ─── Komponen Utama ────────────────────────────────────────────────────────────
 export default function RekapanPembayaran() {
   const supabase = createClient();
+  const router = useRouter();
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [isAllTime, setIsAllTime] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [buktiPreviewUrl, setBuktiPreviewUrl] = useState<string | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
+
+  // BARU: pencarian & pagination untuk tabel transaksi
+  const [searchQuery, setSearchQuery] = useState("");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -606,20 +621,24 @@ export default function RekapanPembayaran() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // FIX: sebelumnya `usePengaturanSekolah` cuma di-import tapi tidak pernah
-  // dipanggil di komponen ini, padahal `sekolahInfo` dipakai di bawah untuk
-  // ActionMenuRekap (kwitansi) — bug ini menyebabkan sekolahInfo selalu
-  // undefined. Sekarang dipanggil di sini, satu sumber data untuk kwitansi
-  // per transaksi maupun fitur cetak riwayat per siswa yang baru.
+  // BARU: reset ke halaman 1 setiap kali pencarian atau periode berubah,
+  // supaya tidak "nyangkut" di halaman kosong
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, selectedMonth, selectedYear, isAllTime]);
+
   const { data: sekolahInfo } = usePengaturanSekolah();
 
-  const { data: pembayaranData, isLoading } = useQuery({
-    queryKey: ["rekapan-pembayaran", selectedMonth, selectedYear],
-    queryFn: async () => {
-      const startDate = new Date(selectedYear, selectedMonth - 1, 1).toISOString();
-      const endDate = new Date(selectedYear, selectedMonth, 1).toISOString();
+  const handlePilihBulan = (m: number, y: number) => {
+    setIsAllTime(false);
+    setSelectedMonth(m);
+    setSelectedYear(y);
+  };
 
-      const { data, error } = await supabase
+  const { data: pembayaranData, isLoading } = useQuery({
+    queryKey: ["rekapan-pembayaran", selectedMonth, selectedYear, isAllTime],
+    queryFn: async () => {
+      let query = supabase
         .from("pembayaran")
         .select(`
           idpembayaran,
@@ -641,9 +660,15 @@ export default function RekapanPembayaran() {
           )
         `)
         .eq("statuspembayaran", "SUCCESS")
-        .gte("tanggalpembayaran", startDate)
-        .lt("tanggalpembayaran", endDate)
         .order("tanggalpembayaran", { ascending: false });
+
+      if (!isAllTime) {
+        const startDate = new Date(selectedYear, selectedMonth - 1, 1).toISOString();
+        const endDate = new Date(selectedYear, selectedMonth, 1).toISOString();
+        query = query.gte("tanggalpembayaran", startDate).lt("tanggalpembayaran", endDate);
+      }
+
+      const { data, error } = await query;
 
       if (error) {
         toast.error("Gagal memuat data", { description: error.message });
@@ -682,8 +707,6 @@ export default function RekapanPembayaran() {
         const breakdown: Record<string, number> = {};
         (data || []).forEach((item: any) => {
           const tagihan = first(item.tagihan_siswa);
-          // FIX: jenjang & jenistagihan sekarang dari kolom snapshot
-          // langsung (tagihan?.jenjang, tagihan?.jenistagihan)
           const jenjang = tagihan?.jenjang || "Lainnya";
           const jenis = tagihan?.jenistagihan || "";
           const key = jenis ? `${jenjang} ${jenis}` : jenjang;
@@ -711,19 +734,53 @@ export default function RekapanPembayaran() {
     [pembayaranData]
   );
 
+  // BARU: filter client-side berdasarkan nama siswa, kelas, atau nama
+  // tagihan. Data satu periode/all-time sudah ada di memori (query di
+  // atas), jadi tidak perlu round-trip lagi ke Supabase tiap ketikan.
+  const filteredData = useMemo(() => {
+    if (!pembayaranData) return [];
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return pembayaranData;
+    return pembayaranData.filter((item: any) => {
+      const tagihan = first(item.tagihan_siswa);
+      const siswa = first(tagihan?.siswa);
+      return (
+        siswa?.namasiswa?.toLowerCase().includes(q) ||
+        siswa?.kelas?.toLowerCase().includes(q) ||
+        tagihan?.namatagihan?.toLowerCase().includes(q)
+      );
+    });
+  }, [pembayaranData, searchQuery]);
+
+  const totalFiltered = useMemo(
+    () => filteredData.reduce((s: number, i: any) => s + parseFloat(i.jumlahdibayar || 0), 0),
+    [filteredData]
+  );
+
+  const totalPages = Math.max(1, Math.ceil(filteredData.length / PAGE_SIZE));
+  const paginatedData = useMemo(
+    () => filteredData.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [filteredData, page]
+  );
+
   const handlePrevMonth = () => {
+    if (isAllTime) return;
     if (selectedMonth === 1) { setSelectedMonth(12); setSelectedYear((y) => y - 1); }
     else setSelectedMonth((m) => m - 1);
   };
 
   const handleNextMonth = () => {
+    if (isAllTime) return;
     if (selectedMonth === 12) { setSelectedMonth(1); setSelectedYear((y) => y + 1); }
     else setSelectedMonth((m) => m + 1);
   };
 
   const handleExport = () => {
-    if (!pembayaranData?.length) { toast.error("Tidak ada data"); return; }
-    const rows = pembayaranData.map((item: any, i: number) => {
+    // BARU: export mengikuti hasil pencarian yang sedang aktif (bukan
+    // cuma halaman yang sedang tampil), supaya konsisten dengan yang
+    // dilihat bendahara di layar.
+    if (!filteredData.length) { toast.error("Tidak ada data"); return; }
+    const rows = filteredData.map((item: any, i: number) => {
       const tagihan = first(item.tagihan_siswa);
       const siswa = first(tagihan?.siswa);
       const sisa = item.sisa_setelah_transaksi_ini != null
@@ -749,7 +806,10 @@ export default function RekapanPembayaran() {
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Pembayaran");
-    XLSX.writeFile(wb, `Pembayaran_${BULAN_NAMA[selectedMonth]}_${selectedYear}.xlsx`);
+    const namaFile = isAllTime
+      ? `Pembayaran_SemuaWaktu_${new Date().toISOString().slice(0, 10)}.xlsx`
+      : `Pembayaran_${BULAN_NAMA[selectedMonth]}_${selectedYear}.xlsx`;
+    XLSX.writeFile(wb, namaFile);
     toast.success("Data berhasil diekspor");
   };
 
@@ -774,7 +834,7 @@ export default function RekapanPembayaran() {
                   <Cell
                     key={`cell-${index}`}
                     fill={
-                      entry.bulan === selectedMonth && entry.tahun === selectedYear
+                      !isAllTime && entry.bulan === selectedMonth && entry.tahun === selectedYear
                         ? COLOR_ACTIVE
                         : COLOR_INACTIVE
                     }
@@ -787,7 +847,7 @@ export default function RekapanPembayaran() {
       </Card>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" size="icon" onClick={handlePrevMonth}>
+        <Button variant="outline" size="icon" onClick={handlePrevMonth} disabled={isAllTime}>
           <ChevronLeft className="h-4 w-4" />
         </Button>
         <div className="relative" ref={pickerRef}>
@@ -796,26 +856,39 @@ export default function RekapanPembayaran() {
             className="gap-2 min-w-[160px] font-semibold"
             onClick={() => setShowPicker((v) => !v)}
           >
-            <Calendar className="h-4 w-4 text-green-600" />
-            {BULAN_NAMA[selectedMonth]} {selectedYear}
+            {isAllTime ? (
+              <InfinityIcon className="h-4 w-4 text-green-600" />
+            ) : (
+              <Calendar className="h-4 w-4 text-green-600" />
+            )}
+            {isAllTime ? "Semua Waktu" : `${BULAN_NAMA[selectedMonth]} ${selectedYear}`}
           </Button>
           {showPicker && (
             <MonthYearPicker
               selectedMonth={selectedMonth}
               selectedYear={selectedYear}
-              onChange={(m, y) => { setSelectedMonth(m); setSelectedYear(y); }}
+              isAllTime={isAllTime}
+              onChange={handlePilihBulan}
+              onSelectAllTime={() => setIsAllTime(true)}
               onClose={() => setShowPicker(false)}
             />
           )}
         </div>
-        <Button variant="outline" size="icon" onClick={handleNextMonth}>
+        <Button variant="outline" size="icon" onClick={handleNextMonth} disabled={isAllTime}>
           <ChevronRight className="h-4 w-4" />
         </Button>
 
-        {/* BARU: tombol cetak riwayat menyeluruh per siswa, dipisah dari
-            navigasi bulan supaya jelas scope-nya beda (per siswa, bukan
-            per bulan yang lagi ditampilkan). */}
-        <div className="ml-auto">
+        {/* BARU: tombol Impor Riwayat sekarang navigasi ke halaman penuh,
+            bukan membuka dialog kecil */}
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => router.push("/admin/rekapan-pembayaran/impor-riwayat")}
+          >
+            <History className="mr-2 h-4 w-4" />
+            Impor Riwayat Pembayaran
+          </Button>
           <CetakRiwayatSiswaDialog sekolah={sekolahInfo} />
         </div>
       </div>
@@ -842,96 +915,147 @@ export default function RekapanPembayaran() {
       </div>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>
-            Daftar Transaksi Pembayaran
-            <span className="ml-2 text-sm font-normal text-muted-foreground">
-              {BULAN_NAMA[selectedMonth]} {selectedYear}
-            </span>
-          </CardTitle>
-          <Button
-            onClick={handleExport}
-            disabled={!pembayaranData?.length}
-            variant="outline"
-            size="sm"
-          >
-            <Download className="mr-2 h-4 w-4" />
-            Export Excel
-          </Button>
-        </CardHeader>
+        {/* Satu baris: judul di kiri, kolom pencarian di tengah, tombol
+            Export Excel di kanan. */}
+<CardHeader>
+  <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+    <CardTitle className="shrink-0">
+      Daftar Transaksi Pembayaran
+      <span className="ml-2 text-sm font-normal text-muted-foreground">
+        {isAllTime ? "Semua Waktu" : `${BULAN_NAMA[selectedMonth]} ${selectedYear}`}
+      </span>
+    </CardTitle>
+
+    <div className="flex items-center gap-2 ml-auto w-full sm:w-auto order-3 sm:order-none">
+      <div className="relative w-full sm:w-64">
+        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+        <Input
+          placeholder="Cari nama siswa, kelas, atau nama tagihan..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="pl-8 h-9 text-sm"
+        />
+      </div>
+
+      <Button
+        onClick={handleExport}
+        disabled={!filteredData.length}
+        variant="outline"
+        size="sm"
+        className="shrink-0"
+      >
+        <Download className="mr-2 h-4 w-4" />
+        Export Excel
+      </Button>
+    </div>
+  </div>
+</CardHeader>
         <CardContent>
           {isLoading ? (
             <div className="text-center py-8">Memuat data...</div>
-          ) : !pembayaranData?.length ? (
+          ) : !filteredData.length ? (
             <div className="text-center py-8 text-muted-foreground">
-              Belum ada transaksi pembayaran untuk periode ini
+              {searchQuery
+                ? "Tidak ada transaksi yang cocok dengan pencarian"
+                : "Belum ada transaksi pembayaran untuk periode ini"}
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/50">
-                    <th className="text-left p-3">No</th>
-                    <th className="text-left p-3">Nama Siswa</th>
-                    <th className="text-left p-3">Kelas</th>
-                    <th className="text-left p-3">Tagihan</th>
-                    <th className="text-left p-3">Metode</th>
-                    <th className="text-right p-3">Dibayar (transaksi ini)</th>
-                    <th className="text-right p-3">Sisa Setelahnya</th>
-                    <th className="text-left p-3">Tanggal</th>
-                    <th className="text-center p-3">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pembayaranData.map((item: any, i: number) => {
-                    const tagihan = first(item.tagihan_siswa);
-                    const siswa = first(tagihan?.siswa);
-                    const sisa = item.sisa_setelah_transaksi_ini;
-                    return (
-                      <tr key={item.idpembayaran} className="border-b hover:bg-muted/50">
-                        <td className="p-3">{i + 1}</td>
-                        <td className="p-3 font-medium">{siswa?.namasiswa || "-"}</td>
-                        <td className="p-3">{siswa?.kelas || "-"}</td>
-                        <td className="p-3">{tagihan?.namatagihan || "-"}</td>
-                        <td className="p-3 capitalize">{item.metodepembayaran || "-"}</td>
-                        <td className="p-3 text-right font-semibold">
-                          {convertIDR(parseFloat(item.jumlahdibayar || 0))}
-                        </td>
-                        <td className="p-3 text-right">
-                          {sisa != null ? (
-                            Number(sisa) <= 0 ? (
-                              <span className="text-green-600 font-semibold">Lunas</span>
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/50">
+                      <th className="text-left p-3">No</th>
+                      <th className="text-left p-3">Nama Siswa</th>
+                      <th className="text-left p-3">Kelas</th>
+                      <th className="text-left p-3">Tagihan</th>
+                      <th className="text-left p-3">Metode</th>
+                      <th className="text-right p-3">Dibayar (transaksi ini)</th>
+                      <th className="text-right p-3">Sisa Setelahnya</th>
+                      <th className="text-left p-3">Tanggal</th>
+                      <th className="text-center p-3">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedData.map((item: any, i: number) => {
+                      const tagihan = first(item.tagihan_siswa);
+                      const siswa = first(tagihan?.siswa);
+                      const sisa = item.sisa_setelah_transaksi_ini;
+                      return (
+                        <tr key={item.idpembayaran} className="border-b hover:bg-muted/50">
+                          <td className="p-3">{(page - 1) * PAGE_SIZE + i + 1}</td>
+                          <td className="p-3 font-medium">{siswa?.namasiswa || "-"}</td>
+                          <td className="p-3">{siswa?.kelas || "-"}</td>
+                          <td className="p-3">{tagihan?.namatagihan || "-"}</td>
+                          <td className="p-3 capitalize">{item.metodepembayaran || "-"}</td>
+                          <td className="p-3 text-right font-semibold">
+                            {convertIDR(parseFloat(item.jumlahdibayar || 0))}
+                          </td>
+                          <td className="p-3 text-right">
+                            {sisa != null ? (
+                              Number(sisa) <= 0 ? (
+                                <span className="text-green-600 font-semibold">Lunas</span>
+                              ) : (
+                                <span className="text-orange-600">{convertIDR(Number(sisa))}</span>
+                              )
                             ) : (
-                              <span className="text-orange-600">{convertIDR(Number(sisa))}</span>
-                            )
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </td>
-                        <td className="p-3">
-                          {new Date(item.tanggalpembayaran).toLocaleDateString("id-ID")}
-                        </td>
-                        {/* Aksi: satu tombol dropdown berisi Cetak Kwitansi & Lihat Bukti Pembayaran */}
-                        <td className="p-3 text-center">
-                          <ActionMenuRekap
-                            item={item}
-                            sekolah={sekolahInfo}
-                            onPreviewBukti={setBuktiPreviewUrl}
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t-2 font-bold bg-muted/30">
-                    <td colSpan={5} className="p-3 text-right">Total:</td>
-                    <td className="p-3 text-right text-green-600">{convertIDR(totalNominal)}</td>
-                    <td colSpan={3} />
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </td>
+                          <td className="p-3">
+                            {new Date(item.tanggalpembayaran).toLocaleDateString("id-ID")}
+                          </td>
+                          <td className="p-3 text-center">
+                            <ActionMenuRekap
+                              item={item}
+                              sekolah={sekolahInfo}
+                              onPreviewBukti={setBuktiPreviewUrl}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 font-bold bg-muted/30">
+                      <td colSpan={5} className="p-3 text-right">
+                        Total{searchQuery ? " (hasil pencarian)" : ""}:
+                      </td>
+                      <td className="p-3 text-right text-green-600">{convertIDR(totalFiltered)}</td>
+                      <td colSpan={3} />
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              {/* BARU: kontrol pagination — dipusatkan di tengah bawah */}
+              <div className="flex flex-col items-center gap-2 mt-4 pt-3 border-t">
+                <p className="text-xs text-muted-foreground">
+                  Menampilkan {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredData.length)} dari {filteredData.length} transaksi
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="text-xs text-muted-foreground min-w-[90px] text-center">
+                    Halaman {page} dari {totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page === totalPages}
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

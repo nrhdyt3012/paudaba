@@ -7,6 +7,7 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { generateQrCodeDataUrl } from "@/lib/kwitansi-helper";
 import KwitansiTemplate, {
   KwitansiData,
+  SekolahInfo,
 } from "@/components/common/kwitansi-template";
 import { notFound } from "next/navigation";
 
@@ -115,6 +116,25 @@ export default async function KwitansiPage({
     namatagihan: t.master_tagihan?.namatagihan || "-",
   }));
 
+  // Ambil profil sekolah (dipakai untuk header, footer/ttd bendahara di
+  // kwitansi) — di-fetch di server pakai admin client supaya tetap dinamis
+  // meskipun halaman ini publik/tanpa login.
+  const { data: sekolahRow } = await supabase
+    .from("pengaturan_sekolah")
+    .select(
+      "nama_sekolah, alamat_sekolah, logo_url, nama_bendahara, tanda_tangan_bendahara_url"
+    )
+    .eq("id", 1)
+    .maybeSingle();
+
+  const sekolah: SekolahInfo = {
+    namaSekolah: sekolahRow?.nama_sekolah || "-",
+    alamatSekolah: sekolahRow?.alamat_sekolah || "-",
+    logoUrl: sekolahRow?.logo_url || null,
+    namaBendahara: sekolahRow?.nama_bendahara || "-",
+    tandaTanganUrl: sekolahRow?.tanda_tangan_bendahara_url || null,
+  };
+
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   const linkKwitansi = `${appUrl}/kwitansi/${idPembayaran}`;
   const qrCodeDataUrl = await generateQrCodeDataUrl(linkKwitansi);
@@ -154,6 +174,7 @@ export default async function KwitansiPage({
     isLunas,
     qrCodeDataUrl,
     tagihanLain,
+    sekolah,
   };
 
   return (

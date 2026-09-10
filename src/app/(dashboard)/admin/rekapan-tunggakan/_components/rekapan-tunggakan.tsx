@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { convertIDR } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
@@ -11,6 +12,8 @@ import {
   Download,
   Calendar,
   MessageSquare,
+  Search,
+  Infinity as InfinityIcon,
 } from "lucide-react";
 import { useMemo, useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
@@ -47,6 +50,9 @@ const COLOR_INACTIVE = "#fca5a5";
 // "BELUM LUNAS" (cicilan). Sebelumnya cuma "BELUM BAYAR", jadi tagihan
 // yang sudah dicicil sebagian HILANG dari rekapan ini.
 const STATUS_TUNGGAKAN = ["BELUM BAYAR", "BELUM LUNAS"];
+
+// BARU: ukuran halaman untuk pagination tabel tunggakan
+const PAGE_SIZE = 15;
 
 // Helper: sisa tagihan = jumlahtagihan - jumlahterbayar (bukan nominal penuh)
 const hitungSisa = (item: any) =>
@@ -93,15 +99,21 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 // ─── Month-Year Picker ─────────────────────────────────────────────────────────
+// BARU: tambah opsi "Semua Waktu" — menampilkan seluruh tunggakan di semua
+// periode sekaligus, bukan cuma bulan yang sedang dipilih.
 const MonthYearPicker = ({
   selectedMonth,
   selectedYear,
+  isAllTime,
   onChange,
+  onSelectAllTime,
   onClose,
 }: {
   selectedMonth: number;
   selectedYear: number;
+  isAllTime: boolean;
   onChange: (month: number, year: number) => void;
+  onSelectAllTime: () => void;
   onClose: () => void;
 }) => {
   const [pickerYear, setPickerYear] = useState(selectedYear);
@@ -109,6 +121,18 @@ const MonthYearPicker = ({
 
   return (
     <div className="absolute z-50 top-full mt-2 left-1/2 -translate-x-1/2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-4 w-72">
+      <button
+        onClick={() => { onSelectAllTime(); onClose(); }}
+        className={`w-full mb-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+          isAllTime
+            ? "bg-red-600 text-white shadow-sm"
+            : "bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900"
+        }`}
+      >
+        <InfinityIcon className="h-3.5 w-3.5" />
+        Semua Waktu
+      </button>
+
       <div className="flex items-center justify-between mb-4">
         <button
           onClick={() => setPickerYear((y) => y - 1)}
@@ -128,7 +152,7 @@ const MonthYearPicker = ({
       <div className="grid grid-cols-3 gap-2">
         {BULAN_SINGKAT.slice(1).map((nama, idx) => {
           const bulanIdx = idx + 1;
-          const isActive = bulanIdx === selectedMonth && pickerYear === selectedYear;
+          const isActive = !isAllTime && bulanIdx === selectedMonth && pickerYear === selectedYear;
           return (
             <button
               key={bulanIdx}
@@ -158,8 +182,14 @@ export default function RekapanTunggakan() {
   const isKepalaSekolah = profile?.role === "kepala_sekolah";
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  // BARU: mode Semua Waktu — melepas filter bulan/tahun pada query tabel
+  const [isAllTime, setIsAllTime] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
+
+  // BARU: pencarian & pagination untuk tabel tunggakan
+  const [searchQuery, setSearchQuery] = useState("");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -171,11 +201,21 @@ export default function RekapanTunggakan() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // ─── Data tabel per periode terpilih ──────────────────────────────────────
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, selectedMonth, selectedYear, isAllTime]);
+
+  const handlePilihBulan = (m: number, y: number) => {
+    setIsAllTime(false);
+    setSelectedMonth(m);
+    setSelectedYear(y);
+  };
+
+  // ─── Data tabel per periode terpilih (atau semua waktu) ──────────────────
   const { data: tunggakanData, isLoading } = useQuery({
-    queryKey: ["rekapan-tunggakan", selectedMonth, selectedYear],
+    queryKey: ["rekapan-tunggakan", selectedMonth, selectedYear, isAllTime],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from("tagihan_siswa")
         .select(`
           idtagihansiswa,
@@ -191,9 +231,14 @@ export default function RekapanTunggakan() {
           siswa:siswa!idsiswa(id, namasiswa, kelas, nowa, nis)
         `)
         .in("statuspembayaran", STATUS_TUNGGAKAN)
-        .eq("bulan", selectedMonth)
-        .eq("tahun", selectedYear)
         .order("createdat", { ascending: false });
+
+      // BARU: filter bulan/tahun cuma diterapkan kalau BUKAN mode Semua Waktu
+      if (!isAllTime) {
+        query = query.eq("bulan", selectedMonth).eq("tahun", selectedYear);
+      }
+
+      const { data, error } = await query;
 
       if (error) {
         toast.error("Gagal memuat data", { description: error.message });
@@ -227,13 +272,8 @@ export default function RekapanTunggakan() {
           .eq("bulan", m)
           .eq("tahun", y);
 
-        // FIX poin 3: grafik menghitung berdasarkan SISA (dan tetap
-        // menghitung jumlah baris tunggakan untuk breakdown per jenjang),
-        // bukan menganggap semua tunggakan senilai nominal penuh.
         const breakdown: Record<string, number> = {};
         (data || []).forEach((item: any) => {
-          // FIX: jenjang & jenistagihan sekarang dari kolom snapshot
-          // langsung (item.jenjang, item.jenistagihan)
           const jenjang = item.jenjang || "Lainnya";
           const jenis = item.jenistagihan || "";
           const key = jenis ? `${jenjang} ${jenis}` : jenjang;
@@ -264,19 +304,46 @@ export default function RekapanTunggakan() {
     [tunggakanData]
   );
 
+  // BARU: filter client-side berdasarkan nama siswa, kelas, atau nama tagihan
+  const filteredData = useMemo(() => {
+    if (!tunggakanData) return [];
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return tunggakanData;
+    return tunggakanData.filter((item: any) => {
+      return (
+        item.siswa?.namasiswa?.toLowerCase().includes(q) ||
+        item.siswa?.kelas?.toLowerCase().includes(q) ||
+        item.namatagihan?.toLowerCase().includes(q)
+      );
+    });
+  }, [tunggakanData, searchQuery]);
+
+  const totalFiltered = useMemo(
+    () => filteredData.reduce((s: number, i: any) => s + hitungSisa(i), 0),
+    [filteredData]
+  );
+
+  const totalPages = Math.max(1, Math.ceil(filteredData.length / PAGE_SIZE));
+  const paginatedData = useMemo(
+    () => filteredData.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [filteredData, page]
+  );
+
   const handlePrevMonth = () => {
+    if (isAllTime) return;
     if (selectedMonth === 1) { setSelectedMonth(12); setSelectedYear((y) => y - 1); }
     else setSelectedMonth((m) => m - 1);
   };
 
   const handleNextMonth = () => {
+    if (isAllTime) return;
     if (selectedMonth === 12) { setSelectedMonth(1); setSelectedYear((y) => y + 1); }
     else setSelectedMonth((m) => m + 1);
   };
 
   const handleExport = () => {
-    if (!tunggakanData?.length) { toast.error("Tidak ada data"); return; }
-    const rows = tunggakanData.map((item: any, i: number) => ({
+    if (!filteredData.length) { toast.error("Tidak ada data"); return; }
+    const rows = filteredData.map((item: any, i: number) => ({
       No: i + 1,
       "ID Tagihan": item.idtagihansiswa,
       "Nama Siswa": item.siswa?.namasiswa || "-",
@@ -294,7 +361,10 @@ export default function RekapanTunggakan() {
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Tunggakan");
-    XLSX.writeFile(wb, `Tunggakan_${BULAN_NAMA[selectedMonth]}_${selectedYear}.xlsx`);
+    const namaFile = isAllTime
+      ? `Tunggakan_SemuaWaktu_${new Date().toISOString().slice(0, 10)}.xlsx`
+      : `Tunggakan_${BULAN_NAMA[selectedMonth]}_${selectedYear}.xlsx`;
+    XLSX.writeFile(wb, namaFile);
     toast.success("Data berhasil diekspor");
   };
 
@@ -320,7 +390,7 @@ export default function RekapanTunggakan() {
                   <Cell
                     key={`cell-${index}`}
                     fill={
-                      entry.bulan === selectedMonth && entry.tahun === selectedYear
+                      !isAllTime && entry.bulan === selectedMonth && entry.tahun === selectedYear
                         ? COLOR_ACTIVE
                         : COLOR_INACTIVE
                     }
@@ -334,7 +404,7 @@ export default function RekapanTunggakan() {
 
       {/* ─── Navigasi periode ───────────────────────────────────────────────── */}
       <div className="flex items-center gap-2">
-        <Button variant="outline" size="icon" onClick={handlePrevMonth}>
+        <Button variant="outline" size="icon" onClick={handlePrevMonth} disabled={isAllTime}>
           <ChevronLeft className="h-4 w-4" />
         </Button>
         <div className="relative" ref={pickerRef}>
@@ -343,19 +413,25 @@ export default function RekapanTunggakan() {
             className="gap-2 min-w-[160px] font-semibold"
             onClick={() => setShowPicker((v) => !v)}
           >
-            <Calendar className="h-4 w-4 text-red-600" />
-            {BULAN_NAMA[selectedMonth]} {selectedYear}
+            {isAllTime ? (
+              <InfinityIcon className="h-4 w-4 text-red-600" />
+            ) : (
+              <Calendar className="h-4 w-4 text-red-600" />
+            )}
+            {isAllTime ? "Semua Waktu" : `${BULAN_NAMA[selectedMonth]} ${selectedYear}`}
           </Button>
           {showPicker && (
             <MonthYearPicker
               selectedMonth={selectedMonth}
               selectedYear={selectedYear}
-              onChange={(m, y) => { setSelectedMonth(m); setSelectedYear(y); }}
+              isAllTime={isAllTime}
+              onChange={handlePilihBulan}
+              onSelectAllTime={() => setIsAllTime(true)}
               onClose={() => setShowPicker(false)}
             />
           )}
         </div>
-        <Button variant="outline" size="icon" onClick={handleNextMonth}>
+        <Button variant="outline" size="icon" onClick={handleNextMonth} disabled={isAllTime}>
           <ChevronRight className="h-4 w-4" />
         </Button>
       </div>
@@ -382,95 +458,151 @@ export default function RekapanTunggakan() {
         </Card>
       </div>
 
-      {/* ─── Tabel tunggakan — Export Excel masuk ke CardHeader ─────────────── */}
+      {/* ─── Tabel tunggakan ─────────────────────────────────────────────────── */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>
-            Daftar Siswa Menunggak
-            <span className="ml-2 text-sm font-normal text-muted-foreground">
-              {BULAN_NAMA[selectedMonth]} {selectedYear}
-            </span>
-          </CardTitle>
-          <div className="flex items-center gap-2">
-            <Button
-              onClick={handleExport}
-              disabled={!tunggakanData?.length}
-              variant="outline"
-              size="sm"
-            >
-              <Download className="mr-2 h-4 w-4" />
-              Export Excel
-            </Button>
-            {/* FIX poin 4: sekarang navigasi ke HALAMAN PENUH (bukan popup),
-                yang sudah menggabungkan tagihan per siswa. */}
-            {!isKepalaSekolah && (
-              <Button
-                onClick={() => router.push("/admin/rekapan-tunggakan/reminder")}
-                size="sm"
-                className="bg-green-600 hover:bg-green-700"
-              >
-                <MessageSquare className="mr-2 h-4 w-4" />
-                Tagih via WhatsApp
-              </Button>
-            )}
-          </div>
-        </CardHeader>
+        {/* Satu baris: judul di kiri, kolom pencarian di tengah, tombol
+            aksi (Export Excel + Tagih via WhatsApp) di kanan. */}
+<CardHeader>
+  <div className="flex items-center gap-3 flex-wrap lg:flex-nowrap">
+    <CardTitle className="shrink-0">
+      Daftar Siswa Menunggak
+      <span className="ml-2 text-sm font-normal text-muted-foreground">
+        {isAllTime ? "Semua Waktu" : `${BULAN_NAMA[selectedMonth]} ${selectedYear}`}
+      </span>
+    </CardTitle>
+
+    <div className="flex items-center gap-2 ml-auto w-full lg:w-auto order-3 lg:order-none flex-wrap sm:flex-nowrap">
+      <div className="relative w-full sm:w-64">
+        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+        <Input
+          placeholder="Cari nama siswa, kelas, atau nama tagihan..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="pl-8 h-9 text-sm"
+        />
+      </div>
+
+      <Button
+        onClick={handleExport}
+        disabled={!filteredData.length}
+        variant="outline"
+        size="sm"
+        className="shrink-0"
+      >
+        <Download className="mr-2 h-4 w-4" />
+        Export Excel
+      </Button>
+      {!isKepalaSekolah && (
+        <Button
+          onClick={() => router.push("/admin/rekapan-tunggakan/reminder")}
+          size="sm"
+          className="bg-green-600 hover:bg-green-700 shrink-0"
+        >
+          <MessageSquare className="mr-2 h-4 w-4" />
+          Tagih via WhatsApp
+        </Button>
+      )}
+    </div>
+  </div>
+</CardHeader>
         <CardContent>
           {isLoading ? (
             <div className="text-center py-8">Memuat data...</div>
-          ) : !tunggakanData?.length ? (
+          ) : !filteredData.length ? (
             <div className="text-center py-8 text-muted-foreground">
-              Tidak ada tunggakan untuk periode ini 🎉
+              {searchQuery
+                ? "Tidak ada tunggakan yang cocok dengan pencarian"
+                : "Tidak ada tunggakan untuk periode ini 🎉"}
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/50">
-                    <th className="text-left p-3">No</th>
-                    <th className="text-left p-3">Nama Siswa</th>
-                    <th className="text-left p-3">Kelas</th>
-                    <th className="text-left p-3">No. WA Wali</th>
-                    <th className="text-left p-3">Tagihan</th>
-                    <th className="text-right p-3">Sisa</th>
-                    <th className="text-center p-3">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tunggakanData.map((item: any, i: number) => (
-                    <tr key={item.idtagihansiswa} className="border-b hover:bg-muted/50">
-                      <td className="p-3">{i + 1}</td>
-                      <td className="p-3 font-medium">{item.siswa?.namasiswa || "-"}</td>
-                      <td className="p-3">{item.siswa?.kelas || "-"}</td>
-                      <td className="p-3">{item.siswa?.nowa || "-"}</td>
-                      <td className="p-3">{item.namatagihan || "-"}</td>
-                      {/* FIX poin 3: tampilkan SISA, bukan nominal penuh */}
-                      <td className="p-3 text-right font-semibold">
-                        {convertIDR(hitungSisa(item))}
-                      </td>
-                      <td className="p-3 text-center">
-                        <span
-                          className={`px-2 py-1 rounded-full text-xs ${
-                            item.statuspembayaran === "BELUM LUNAS"
-                              ? "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100"
-                              : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100"
-                          }`}
-                        >
-                          {item.statuspembayaran === "BELUM LUNAS" ? "Belum Lunas" : "Belum Bayar"}
-                        </span>
-                      </td>
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/50">
+                      <th className="text-left p-3">No</th>
+                      <th className="text-left p-3">Nama Siswa</th>
+                      <th className="text-left p-3">Kelas</th>
+                      <th className="text-left p-3">No. WA Wali</th>
+                      <th className="text-left p-3">Tagihan</th>
+                      {isAllTime && <th className="text-left p-3">Periode</th>}
+                      <th className="text-right p-3">Sisa</th>
+                      <th className="text-center p-3">Status</th>
                     </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t-2 font-bold bg-muted/30">
-                    <td colSpan={5} className="p-3 text-right">Total Sisa:</td>
-                    <td className="p-3 text-right text-red-600">{convertIDR(totalNominal)}</td>
-                    <td />
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {paginatedData.map((item: any, i: number) => (
+                      <tr key={item.idtagihansiswa} className="border-b hover:bg-muted/50">
+                        <td className="p-3">{(page - 1) * PAGE_SIZE + i + 1}</td>
+                        <td className="p-3 font-medium">{item.siswa?.namasiswa || "-"}</td>
+                        <td className="p-3">{item.siswa?.kelas || "-"}</td>
+                        <td className="p-3">{item.siswa?.nowa || "-"}</td>
+                        <td className="p-3">{item.namatagihan || "-"}</td>
+                        {/* BARU: kolom periode cuma ditampilkan di mode Semua
+                            Waktu, karena di mode per-bulan periodenya sudah
+                            jelas dari label di atas tabel */}
+                        {isAllTime && (
+                          <td className="p-3 text-muted-foreground">
+                            {BULAN_NAMA[item.bulan]} {item.tahun}
+                          </td>
+                        )}
+                        <td className="p-3 text-right font-semibold">
+                          {convertIDR(hitungSisa(item))}
+                        </td>
+                        <td className="p-3 text-center">
+                          <span
+                            className={`px-2 py-1 rounded-full text-xs ${
+                              item.statuspembayaran === "BELUM LUNAS"
+                                ? "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100"
+                                : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100"
+                            }`}
+                          >
+                            {item.statuspembayaran === "BELUM LUNAS" ? "Belum Lunas" : "Belum Bayar"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 font-bold bg-muted/30">
+                      <td colSpan={isAllTime ? 5 : 4} className="p-3 text-right">
+                        Total Sisa{searchQuery ? " (hasil pencarian)" : ""}:
+                      </td>
+                      <td className="p-3 text-right text-red-600">{convertIDR(totalFiltered)}</td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              {/* BARU: kontrol pagination — dipusatkan di tengah bawah */}
+              <div className="flex flex-col items-center gap-2 mt-4 pt-3 border-t">
+                <p className="text-xs text-muted-foreground">
+                  Menampilkan {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredData.length)} dari {filteredData.length} tunggakan
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="text-xs text-muted-foreground min-w-[90px] text-center">
+                    Halaman {page} dari {totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page === totalPages}
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
