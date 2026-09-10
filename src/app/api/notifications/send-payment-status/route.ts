@@ -91,16 +91,19 @@ export async function POST(request: NextRequest) {
     if (status === "SUCCESS") {
       const linkKwitansi = `${appUrl}/kwitansi/${idPembayaran}`;
 
-      const tanggalFormatted = new Date(pembayaran.tanggalpembayaran).toLocaleDateString(
-        "id-ID",
-        {
+      // FIX: tambahkan timeZone eksplisit "Asia/Jakarta". Tanpa ini,
+      // Date.toLocaleDateString() memakai timezone environment server
+      // (biasanya UTC di production), sehingga jam yang dihasilkan
+      // sebenarnya UTC walau di-suffix " WIB" secara manual — selisih 7 jam.
+      const tanggalFormatted =
+        new Date(pembayaran.tanggalpembayaran).toLocaleDateString("id-ID", {
           year: "numeric",
           month: "long",
           day: "numeric",
           hour: "2-digit",
           minute: "2-digit",
-        }
-      ) + " WIB";
+          timeZone: "Asia/Jakarta",
+        }) + " WIB";
 
       // FIX poin 5/6: pakai snapshot sisa_setelah_transaksi_ini kalau ada
       // (immutable, akurat pada saat transaksi ini terjadi). Fallback ke

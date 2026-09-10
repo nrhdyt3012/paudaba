@@ -17,6 +17,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { format } from "date-fns";
+import { id as localeID } from "date-fns/locale";
 import {
   Select,
   SelectContent,
@@ -64,6 +68,73 @@ const METODE_OPTIONS = [
 ];
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
+
+// BARU: pengganti <input type="date"> bawaan browser. Native date picker
+// menampilkan teks sesuai locale browser/OS pengguna (bisa MM/DD/YYYY di
+// sebagian browser) dan itu TIDAK bisa dipaksa lewat atribut HTML apa pun
+// (termasuk `lang`) — jadi biar kalender tetap ada (bisa klik tanggal,
+// tombol "Hari Ini", dst.) tapi teks yang tampil di kotaknya dijamin selalu
+// dd/MM/yyyy, kalender ini dibuat sendiri pakai Popover + Calendar dari
+// shadcn/ui, lalu label tombolnya diformat manual dengan date-fns.
+// Value & onChange tetap pakai string ISO (yyyy-mm-dd) supaya kompatibel
+// dengan sisa kode yang sudah ada.
+function TanggalInputID({
+  value,
+  onChange,
+  compact = false,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  compact?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const dateValue = value ? new Date(`${value}T00:00:00`) : undefined;
+
+  const handleSelect = (d: Date | undefined) => {
+    if (!d) return;
+    const y = d.getFullYear();
+    const m = (d.getMonth() + 1).toString().padStart(2, "0");
+    const day = d.getDate().toString().padStart(2, "0");
+    onChange(`${y}-${m}-${day}`);
+    setOpen(false);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          className={`w-full justify-start font-normal ${compact ? "h-8 text-sm px-2" : "h-9"}`}
+        >
+          <CalendarDays className="mr-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          {/* BARU: diformat manual dd/MM/yyyy — tidak pernah ikut locale
+              browser, jadi klik "Hari Ini" pun tetap tampil 10/09/2026,
+              bukan 09/10/2026. */}
+          {dateValue ? format(dateValue, "dd/MM/yyyy") : "Pilih tanggal"}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-0" align="start">
+        <Calendar
+          mode="single"
+          selected={dateValue}
+          onSelect={handleSelect}
+          locale={localeID}
+        />
+        <div className="flex justify-end gap-2 p-2 border-t">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => handleSelect(new Date())}
+          >
+            Hari Ini
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 type MetodePembayaran = "cash" | "transfer";
 
@@ -499,13 +570,7 @@ export default function ImporRiwayatPembayaranPage() {
                   <CalendarDays className="h-3.5 w-3.5" />
                   Tanggal Pembayaran (default)
                 </Label>
-                <Input
-                  type="date"
-                  lang="en-GB"
-                  value={globalTanggal}
-                  onChange={(e) => setGlobalTanggal(e.target.value)}
-                  className="w-full"
-                />
+                <TanggalInputID value={globalTanggal} onChange={setGlobalTanggal} />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs flex items-center gap-1.5">
@@ -673,7 +738,7 @@ export default function ImporRiwayatPembayaranPage() {
                 return (
                   <div
                     key={r.siswaId}
-                    className="p-3 rounded-lg border grid grid-cols-2 sm:grid-cols-[1fr_110px_130px_110px_90px] gap-2 items-end"
+                    className="p-3 rounded-lg border grid grid-cols-2 sm:grid-cols-[1fr_110px_200px_110px_90px] gap-2 items-end"
                   >
                     <div className="col-span-2 sm:col-span-1">
                       <Label className="text-[11px] text-muted-foreground">Siswa</Label>
@@ -691,12 +756,10 @@ export default function ImporRiwayatPembayaranPage() {
                     </div>
                     <div className="space-y-1">
                       <Label className="text-[11px] text-muted-foreground">Tanggal</Label>
-                      <Input
-                        type="date"
-                        lang="en-GB"
+                      <TanggalInputID
                         value={r.tanggal}
-                        onChange={(e) => updateRow(r.siswaId, { tanggal: e.target.value })}
-                        className="h-8 text-sm"
+                        onChange={(v) => updateRow(r.siswaId, { tanggal: v })}
+                        compact
                       />
                     </div>
                     <div className="space-y-1">

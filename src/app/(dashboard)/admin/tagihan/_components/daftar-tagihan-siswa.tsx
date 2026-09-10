@@ -180,40 +180,54 @@ export default function DaftarTagihanSiswa() {
     },
   });
 
-  const { data: tagihanList, isLoading } = useQuery({
-    queryKey: ["tagihan-siswa-list", currentPage, currentLimit, currentSearch, filterKelas, filterStatus],
-    queryFn: async () => {
-      let query = supabase
-        .from("tagihan_siswa")
-        .select(
-          `*, siswa!idsiswa(id, namasiswa, kelas, nowa),
-          pembayaran(idpembayaran, statuspembayaran, metodepembayaran)`,
-          { count: "exact" }
-        );
+const { data: tagihanList, isLoading } = useQuery({
+  queryKey: ["tagihan-siswa-list", currentPage, currentLimit, currentSearch, filterKelas, filterStatus],
+  queryFn: async () => {
+    // Cari dulu siswa yang namanya cocok, kalau ada kata kunci pencarian
+    let matchedSiswaIds: string[] = [];
+    if (currentSearch) {
+      const { data: siswaMatch } = await supabase
+        .from("siswa")
+        .select("id")
+        .ilike("namasiswa", `%${currentSearch}%`);
+      matchedSiswaIds = (siswaMatch || []).map((s) => s.id);
+    }
 
-      if (filterStatus.length > 0) query = query.in("statuspembayaran", filterStatus);
-      if (filterKelas.length > 0) query = query.in("siswa.kelas", filterKelas);
+    let query = supabase
+      .from("tagihan_siswa")
+      .select(
+        `*, siswa!idsiswa(id, namasiswa, kelas, nowa),
+        pembayaran(idpembayaran, statuspembayaran, metodepembayaran)`,
+        { count: "exact" }
+      );
 
-      if (currentSearch) {
-        query = query.or(
-          `siswa.namasiswa.ilike.%${currentSearch}%,namatagihan.ilike.%${currentSearch}%`
-        );
+    if (filterStatus.length > 0) query = query.in("statuspembayaran", filterStatus);
+    if (filterKelas.length > 0) query = query.in("siswa.kelas", filterKelas);
+
+    if (currentSearch) {
+      // Sekarang semua kondisi di dalam .or() adalah kolom tabel utama
+      // (tagihan_siswa), bukan campuran dengan kolom tabel relasi.
+      const orParts = [`namatagihan.ilike.%${currentSearch}%`];
+      if (matchedSiswaIds.length > 0) {
+        orParts.push(`idsiswa.in.(${matchedSiswaIds.join(",")})`);
       }
+      query = query.or(orParts.join(","));
+    }
 
-      const { data, count, error } = await query
-        .range((currentPage - 1) * currentLimit, currentPage * currentLimit - 1)
-        .order("createdat", { ascending: false });
+    const { data, count, error } = await query
+      .range((currentPage - 1) * currentLimit, currentPage * currentLimit - 1)
+      .order("createdat", { ascending: false });
 
-      if (error) toast.error("Gagal memuat tagihan", { description: error.message });
+    if (error) toast.error("Gagal memuat tagihan", { description: error.message });
 
-      let result = data || [];
-      if (filterKelas.length > 0) {
-        result = result.filter((item: any) => filterKelas.includes(item.siswa?.kelas));
-      }
+    let result = data || [];
+    if (filterKelas.length > 0) {
+      result = result.filter((item: any) => filterKelas.includes(item.siswa?.kelas));
+    }
 
-      return { data: result, count: count || 0 };
-    },
-  });
+    return { data: result, count: count || 0 };
+  },
+});
 
   const [selectedAction, setSelectedAction] = useState<{ data: any; type: "bayar" | "delete" } | null>(null);
   const handleChangeAction = (open: boolean) => { if (!open) setSelectedAction(null); };

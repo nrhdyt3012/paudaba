@@ -150,18 +150,32 @@ export default async function KwitansiPage({
     pembayaran.statuspembayaran === "SUCCESS";
 
   const tglBayar = new Date(pembayaran.tanggalpembayaran);
+  // FIX: noKwitansi pakai getFullYear() tanpa timezone override — ini
+  // dianggap masih aman karena pergeseran tahun akibat selisih 7 jam
+  // hampir mustahil terjadi (hanya berisiko kalau transaksi terjadi
+  // persis di malam pergantian tahun, 31 Des malam WIB / 1 Jan UTC).
   const noKwitansi = `${tagihan.idtagihansiswa}/${pembayaran.idpembayaran}/${tglBayar.getFullYear()}`;
 
   const kwitansiData: KwitansiData = {
     noKwitansi,
+    // FIX: tambahkan timeZone "Asia/Jakarta". Tanpa ini, tanggal cetak bisa
+    // ikut meleset (mundur satu hari) kalau pembayaran terjadi larut malam
+    // WIB tapi masih hari sebelumnya dalam UTC.
     tanggalCetak: tglBayar.toLocaleDateString("id-ID", {
       day: "numeric",
       month: "long",
       year: "numeric",
+      timeZone: "Asia/Jakarta",
     }),
+    // FIX: tambahkan timeZone "Asia/Jakarta" — sebelumnya jam yang tampil
+    // adalah jam UTC (server timezone) walau di-suffix " WIB" secara manual.
     jamCetak:
       tglBayar
-        .toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
+        .toLocaleTimeString("id-ID", {
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: "Asia/Jakarta",
+        })
         .replace(":", ".") + " WIB",
     namaSiswa: siswa.namasiswa || "-",
     kelas: siswa.kelas || "-",
