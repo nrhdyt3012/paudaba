@@ -12,22 +12,58 @@ import {
 } from "@/lib/siswa-delete-guard";
 
 // ─── Helper: slug nama → dipakai untuk generate email otomatis ────────────────
-// Nama fungsinya tetap "slugifyNamaWali" (biar tidak perlu ganti semua
-// pemanggilnya), tapi sekarang input yang dilewatkan ke sini adalah NAMA
-// SISWA, bukan nama wali — lihat perubahan di createUser() dan blok impor
-// di bawah. Alasan: data nama wali sering kosong dari sekolah, sedangkan
-// nama siswa selalu wajib diisi.
 function slugifyNamaWali(nama: string): string {
   const s = (nama || "siswa")
     .toLowerCase()
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // buang diakritik
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z\s]/g, "")
     .replace(/\s+/g, "");
   return s || "siswa";
 }
 
+// ─── BARU: Helper normalisasi tanggal lahir ke format ISO (YYYY-MM-DD) ────────
+// Kenapa perlu ini: tanggal dari Excel (baik diketik manual maupun hasil
+// unduh laporan sekolah) selalu berupa TEKS format Indonesia D/M/YYYY atau
+// DD/MM/YYYY (contoh: "17/4/2021" = 17 April 2021). Kolom `tanggallahir` di
+// database bertipe `date`, dan kalau teks ambigu seperti itu dikirim apa
+// adanya, Postgres mem-parsingnya sebagai MM/DD/YYYY (default datestyle) —
+// jadi "17/4/2021" dibaca bulan=17 → error "date/time field value out of
+// range". Baris yang hari-nya <=12 (misal "8/3/2021") TIDAK error, tapi
+// diam-diam salah simpan (bulan & tanggal tertukar jadi 8 Agustus, padahal
+// maksudnya 8 Maret).
+//
+// Fungsi ini dipanggil di titik paling awal setiap alur (create, update,
+// preview import, apply import) supaya SEMUA jalur menyimpan tanggal
+// dengan format ISO yang tidak ambigu, apa pun bentuk input aslinya.
+function parseTanggalLahir(value: string | undefined | null): string {
+  if (!value) return "";
+  const str = String(value).trim();
+  if (!str) return "";
+
+  // Sudah ISO (YYYY-MM-DD) — tidak perlu diubah
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+
+  // Format D/M/YYYY, DD/MM/YYYY, atau varian pemisah '-' / '.'
+  const match = str.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if (match) {
+    const [, d, m, y] = match;
+    const day = parseInt(d, 10);
+    const month = parseInt(m, 10);
+    // Format template & data sekolah selalu D/M/YYYY (hari dulu). Tapi
+    // kalau ternyata bagian pertama > 12 (mustahil jadi bulan) dan bagian
+    // kedua valid sebagai hari, anggap urutannya M/D/YYYY — jaga-jaga saja.
+    if (day > 12 && month <= 12) {
+      return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    }
+    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+
+  // Format tak dikenali — kembalikan apa adanya, biar tertangkap sebagai
+  // error validasi yang jelas, bukan diam-diam salah simpan.
+  return str;
+}
+
 // ─── Helper: cari slug email yang belum kepakai di DB (loop sampai unik) ──────
-// Dipakai untuk create satu siswa manual (form Tambah Siswa).
 async function generateEmailUnik(supabase: any, namaSiswa: string): Promise<string> {
   const slug = slugifyNamaWali(namaSiswa);
   let candidate = `${slug}@gmail.com`;
@@ -45,15 +81,6 @@ async function generateEmailUnik(supabase: any, namaSiswa: string): Promise<stri
   }
 }
 
-// ─── Helper: sama seperti generateEmailUnik, tapi juga menghindari tabrakan
-// dengan email yang BARU SAJA ditetapkan di batch impor Excel yang sama
-// (baris-baris itu belum sempat tersimpan ke DB saat baris berikutnya
-// diproses, jadi query ke DB saja tidak cukup). Basis tetap nama siswa.
-// FIX: sebelumnya blok generate-email di impor cuma cek tabrakan DALAM
-// batch (Map `usedSlugs`), tidak pernah cek ke seluruh DB — jadi kalau ada
-// nama yang kebetulan sama dengan siswa dari batch/pendaftaran sebelumnya,
-// sistem salah kira itu keluarga yang sama dan menggabungkan akunnya.
-// Sekarang keunikannya dijamin ke seluruh database, bukan cuma batch ini.
 async function generateEmailUnikBatch(
   supabase: any,
   namaSiswa: string,
@@ -80,12 +107,6 @@ async function generateEmailUnikBatch(
   }
 }
 
-// ─── Helper: family key untuk pengelompokan import (dipakai preview & apply) ──
-// FIX: sebelumnya kalau nama_wali & no_wa dua-duanya kosong, semua baris
-// seperti itu jatuh ke kunci yang sama (`auto:|`) dan salah dianggap satu
-// keluarga. Sekarang kalau wali & no WA kosong dua-duanya, tiap siswa
-// dianggap berdiri sendiri dulu (kunci pakai NIS) — kalau memang
-// bersaudara, nanti bisa digabung manual lewat "Pindah ke wali lain".
 function familyKey(r: ImportRow): string {
   const email = (r.email || "").trim().toLowerCase();
   if (email) return `email:${email}`;
@@ -111,7 +132,8 @@ export async function createUser(prevState: AuthFormState, formData: FormData) :
     no_wa: formData.get("no_wa"),
     email_wali: formData.get("email_wali") || undefined,
     tempat_lahir: formData.get("tempat_lahir"),
-    tanggal_lahir: formData.get("tanggal_lahir"),
+    // BARU: normalisasi ke ISO sebelum divalidasi/disimpan
+    tanggal_lahir: parseTanggalLahir(formData.get("tanggal_lahir") as string),
     alamat: formData.get("alamat") || undefined,
     tipe_spp: formData.get("tipe_spp") || "reguler",
     role: formData.get("role") || "siswa",
@@ -135,11 +157,9 @@ export async function createUser(prevState: AuthFormState, formData: FormData) :
   let waliAuthId: string;
   let emailSiswa: string;
   let akunAuthBaruDibuat = false;
-  // ── dilaporkan balik ke form kalau email/password digenerate otomatis
   let akunDigenerate: { email: string; password: string } | null = null;
 
   if (data_.mode === "existing") {
-    // ── Anak dari wali yang sudah ada — TIDAK bikin akun auth baru ──────────
     waliAuthId = data_.wali_auth_id!;
 
     const { data: waliExisting } = await supabase
@@ -154,12 +174,6 @@ export async function createUser(prevState: AuthFormState, formData: FormData) :
     }
     emailSiswa = waliExisting.email;
   } else {
-    // ── Wali baru — bikin akun auth. Email/password boleh dikosongkan ───────
-    // dan digenerate otomatis: email dari slug NAMA SISWA (+@gmail.com),
-    // password dari NIS siswa.
-    // FIX: sebelumnya basis email adalah nama_wali — diganti ke nama_siswa
-    // karena data nama wali sering kosong/belum lengkap dari sekolah,
-    // sedangkan nama siswa selalu wajib diisi.
     let emailBaru = (data_.email || "").trim();
     let passwordBaru = (data_.password || "").trim();
     let digenerate = false;
@@ -193,7 +207,6 @@ export async function createUser(prevState: AuthFormState, formData: FormData) :
   }
 
   const { error: insertError } = await supabase.from("siswa").insert({
-    // id TIDAK diisi manual — otomatis gen_random_uuid() dari default kolom
     wali_auth_id: waliAuthId,
     email: emailSiswa,
     namasiswa: data_.nama_siswa,
@@ -227,7 +240,6 @@ export async function createUser(prevState: AuthFormState, formData: FormData) :
   });
 
   revalidatePath("/admin/user");
-  // ── akunDigenerate ikut dikembalikan supaya UI bisa menampilkannya
   return { status: "success", akunDigenerate };
 }
 
@@ -276,7 +288,8 @@ export async function updateUser(prevState: AuthFormState, formData: FormData) {
     no_wa: formData.get("no_wa"),
     email_wali: formData.get("email_wali") || undefined,
     tempat_lahir: formData.get("tempat_lahir"),
-    tanggal_lahir: formData.get("tanggal_lahir"),
+    // BARU: normalisasi ke ISO
+    tanggal_lahir: parseTanggalLahir(formData.get("tanggal_lahir") as string),
     alamat: formData.get("alamat") || undefined,
     tipe_spp: formData.get("tipe_spp") || "reguler",
     role: formData.get("role") || "siswa",
@@ -459,25 +472,26 @@ export async function promoteKelasSiswa(prevState: any, formData: FormData) {
 // ─── Delete User ──────────────────────────────────────────────────────────────
 export async function deleteUser(prevState: AuthFormState, formData: FormData) {
   const supabase = await createClient({ isAdmin: true });
-  const userId = formData.get("id") as string;
+  const userId = formData.get("id") as string; // ID baris public.siswa
 
   if (!userId) {
-    return {
-      status: "error",
-      errors: { _form: ["ID siswa tidak valid"] },
-    };
+    return { status: "error", errors: { _form: ["ID siswa tidak valid"] } };
   }
 
   const { data: siswaData } = await supabase
     .from("siswa")
-    .select("namasiswa")
+    .select("namasiswa, wali_auth_id")
     .eq("id", userId)
     .maybeSingle();
 
-  const namaSiswa = siswaData?.namasiswa || userId;
+  if (!siswaData) {
+    return { status: "error", errors: { _form: ["Data siswa tidak ditemukan"] } };
+  }
+
+  const namaSiswa = siswaData.namasiswa || userId;
+  const waliAuthId = siswaData.wali_auth_id;
 
   const { bisaDihapus, jumlahTransaksi } = await cekSiswaBisaDihapus(supabase, userId);
-
   if (!bisaDihapus) {
     return {
       status: "error",
@@ -493,13 +507,33 @@ export async function deleteUser(prevState: AuthFormState, formData: FormData) {
 
   await bersihkanDataTagihanSiswa(supabase, userId);
 
-  const { error } = await supabase.auth.admin.deleteUser(userId);
+  // Hapus baris siswa dari public.siswa — ini yang sebelumnya tidak pernah dilakukan eksplisit
+  const { error: deleteSiswaError } = await supabase
+    .from("siswa")
+    .delete()
+    .eq("id", userId);
 
-  if (error) {
+  if (deleteSiswaError) {
     return {
       status: "error",
-      errors: { ...prevState?.errors, _form: [error.message] },
+      errors: { _form: [`Gagal menghapus data siswa: ${deleteSiswaError.message}`] },
     };
+  }
+
+  // Hapus akun auth wali HANYA jika tidak ada anak lain yang masih pakai wali_auth_id yang sama
+  if (waliAuthId) {
+    const { count: sisaAnak } = await supabase
+      .from("siswa")
+      .select("id", { count: "exact", head: true })
+      .eq("wali_auth_id", waliAuthId);
+
+    if ((sisaAnak ?? 0) === 0) {
+      const { error: authError } = await supabase.auth.admin.deleteUser(waliAuthId);
+      // Jangan gagalkan proses kalau akun authnya memang sudah tidak ada (data lama/orphan)
+      if (authError && authError.message !== "User not found") {
+        console.error("[deleteUser] Gagal hapus akun auth:", authError.message);
+      }
+    }
   }
 
   await writeChangelog({
@@ -514,21 +548,6 @@ export async function deleteUser(prevState: AuthFormState, formData: FormData) {
 }
 
 // ─── Import Users dari Excel (Bulk) ────────────────────────────────────────────
-// 1. NIS jadi kunci pencocokan: NIS sudah ada di DB -> UPDATE (data akademik
-//    saja, akun/email TIDAK disentuh). NIS belum ada -> INSERT + generate
-//    akun wali baru.
-// 2. Mode UPDATE cuma menimpa field yang ADA ISINYA di file impor — jadi
-//    kalau file impor ulang datanya lebih lengkap dari sebelumnya (NIS
-//    sama), data lama otomatis diperbarui, bukan dobel.
-// 3. Email & Password boleh dikosongkan di file — digenerate otomatis:
-//    email dari slug NAMA SISWA anak pertama dalam "keluarga" yang sama
-//    (+@gmail.com), password dari NIS anak pertama dalam keluarga itu.
-//    Keunikan email dijamin ke SELURUH database (generateEmailUnikBatch),
-//    bukan cuma dalam batch impor ini.
-// 4. Pakai importUserSchema (nama_wali, JK & No WA opsional) — supaya
-//    siswa tetap bisa masuk sistem walau data sekolah belum lengkap.
-// 5. previewImportUsersBulk() — TIDAK menulis ke DB, cuma mensimulasikan
-//    hasilnya (dipakai untuk tombol "Preview" sebelum "Terapkan Import").
 export type ImportRow = {
   nama_siswa: string;
   NIS: string;
@@ -537,8 +556,8 @@ export type ImportRow = {
   angkatan: string;
   nama_wali: string;
   no_wa: string;
-  email?: string;      // opsional — kosong = digenerate otomatis
-  password?: string;   // opsional — kosong = digenerate otomatis
+  email?: string;
+  password?: string;
   tempat_lahir: string;
   tanggal_lahir: string;
   alamat?: string;
@@ -548,19 +567,17 @@ export type ImportRow = {
 export type ImportResult = {
   total: number;
   berhasil: number;
-  ditambahkan: number;   // siswa baru (insert)
-  diperbarui: number;    // siswa lama, NIS sudah ada (update)
+  ditambahkan: number;
+  diperbarui: number;
   gagal: number;
   detailGagal: { baris: number; nama: string; pesan: string }[];
   akunDigenerate: { baris: number; nama: string; email: string; password: string }[];
 };
 
-// ── Tipe untuk hasil Preview (simulasi, belum menulis apa pun ke DB) ──────────
 export type ImportPlanRow = {
   baris: number;
   aksi: "TAMBAH" | "PERBARUI" | "GAGAL";
   keterangan: string;
-  // ── data akademik, ditampilkan sebagai kolom tabel preview ────────────────
   nis: string;
   nama_siswa: string;
   jenis_kelamin: string;
@@ -572,7 +589,6 @@ export type ImportPlanRow = {
   kelas: string;
   angkatan: string;
   tipe_spp: string;
-  // ── akun (hanya terisi kalau aksi = TAMBAH) ────────────────────────────────
   email?: string;
   password?: string;
   pesan?: string;
@@ -587,8 +603,14 @@ export type ImportPlanResult = {
 };
 
 // ─── Preview Import (read-only, TIDAK menulis ke DB) ───────────────────────────
-export async function previewImportUsersBulk(rows: ImportRow[]): Promise<ImportPlanResult> {
+export async function previewImportUsersBulk(rowsInput: ImportRow[]): Promise<ImportPlanResult> {
   const supabase = await createClient({ isAdmin: true });
+
+  // BARU: normalisasi tanggal_lahir ke ISO di awal — sebelum dipakai untuk
+  // validasi Zod maupun ditampilkan di tabel preview. Dengan begini, apa
+  // yang tampil di Preview persis sama dengan yang nanti benar-benar
+  // tersimpan saat "Terapkan Import".
+  const rows = rowsInput.map((r) => ({ ...r, tanggal_lahir: parseTanggalLahir(r.tanggal_lahir) }));
 
   const plan: ImportPlanResult = {
     total: rows.length,
@@ -598,14 +620,12 @@ export async function previewImportUsersBulk(rows: ImportRow[]): Promise<ImportP
     rows: [],
   };
 
-  // ── 1. Cek NIS mana saja yang SUDAH ADA di database ────────────────────────
   const nisList = rows.map((r) => String(r.NIS || "").trim()).filter(Boolean);
   const { data: existingSiswa } = nisList.length
     ? await supabase.from("siswa").select("id, nis").in("nis", nisList)
     : { data: [] as any[] };
   const nisAda = new Set((existingSiswa || []).map((s: any) => String(s.nis).trim()));
 
-  // ── 2. Kelompokkan baris yang akan INSERT per "keluarga" ───────────────────
   const insertRows = rows.filter((r) => {
     const nis = String(r.NIS || "").trim();
     return !(nis && nisAda.has(nis));
@@ -618,10 +638,6 @@ export async function previewImportUsersBulk(rows: ImportRow[]): Promise<ImportP
     groups.get(key)!.rows.push(r);
   }
 
-  // ── 3. Simulasikan email & password per grup ────────────────────────────────
-  // FIX: basis email sekarang nama siswa (bukan nama wali), dan keunikannya
-  // dicek ke seluruh DB + batch impor ini (generateEmailUnikBatch) — bukan
-  // cuma dalam batch seperti sebelumnya.
   const assignedEmailsInBatch = new Set<string>();
   for (const [, group] of groups) {
     const explicitEmail = group.rows.find((r) => (r.email || "").trim())?.email?.trim();
@@ -645,10 +661,6 @@ export async function previewImportUsersBulk(rows: ImportRow[]): Promise<ImportP
     }
   }
 
-  // ── 4. Cek email grup mana yang kebetulan sudah ada wali-nya di DB ─────────
-  // (Sekarang hanya akan match kalau sekolah memang memberi email eksplisit
-  // yang sama dengan akun lama — email hasil generate dijamin belum pernah
-  // ada, jadi tidak akan ke-anggap "gabung akun lama" secara tidak sengaja.)
   const groupEmails = Array.from(
     new Set(Array.from(groups.values()).map((g) => g.email).filter(Boolean))
   ) as string[];
@@ -657,14 +669,11 @@ export async function previewImportUsersBulk(rows: ImportRow[]): Promise<ImportP
     : { data: [] as any[] };
   const emailSudahAda = new Set((waliTerdaftar || []).map((w: any) => w.email));
 
-  // ── 5. Susun rencana per baris ───────────────────────────────────────────────
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
-    const baris = i + 2; // baris 1 = header Excel
+    const baris = i + 2;
     const nis = String(row.NIS || "").trim();
 
-    // Data akademik dasar yang dipakai untuk kolom tabel preview,
-    // sama untuk aksi TAMBAH maupun PERBARUI.
     const dataDasar = {
       nis,
       nama_siswa: row.nama_siswa || "-",
@@ -745,8 +754,14 @@ export async function previewImportUsersBulk(rows: ImportRow[]): Promise<ImportP
 }
 
 // ─── Terapkan Import (menulis ke DB) ───────────────────────────────────────────
-export async function importUsersBulk(rows: ImportRow[]): Promise<ImportResult> {
+export async function importUsersBulk(rowsInput: ImportRow[]): Promise<ImportResult> {
   const supabase = await createClient({ isAdmin: true });
+
+  // BARU: normalisasi tanggal_lahir ke ISO di awal — sebelum dipakai di
+  // validasi Zod, mode UPDATE (langsung ditulis sebagai teks), maupun
+  // mode INSERT. Ini titik tunggal yang menjamin kolom `tanggallahir`
+  // di DB selalu format yang benar, apa pun bentuk teks dari Excel.
+  const rows = rowsInput.map((r) => ({ ...r, tanggal_lahir: parseTanggalLahir(r.tanggal_lahir) }));
 
   const result: ImportResult = {
     total: rows.length,
@@ -758,7 +773,6 @@ export async function importUsersBulk(rows: ImportRow[]): Promise<ImportResult> 
     akunDigenerate: [],
   };
 
-  // ── 1. Cek NIS mana saja yang SUDAH ADA di database (batch, sekali query) ──
   const nisList = rows.map((r) => String(r.NIS || "").trim()).filter(Boolean);
   const { data: existingSiswa } = nisList.length
     ? await supabase.from("siswa").select("id, nis, wali_auth_id").in("nis", nisList)
@@ -769,7 +783,6 @@ export async function importUsersBulk(rows: ImportRow[]): Promise<ImportResult> 
     if (s.nis) nisToExisting.set(String(s.nis).trim(), { id: s.id, wali_auth_id: s.wali_auth_id });
   });
 
-  // ── 2. Kelompokkan baris yang butuh INSERT (NIS belum ada) per "keluarga" ──
   type Group = { rows: ImportRow[]; email?: string; password?: string };
   const groups = new Map<string, Group>();
 
@@ -784,9 +797,6 @@ export async function importUsersBulk(rows: ImportRow[]): Promise<ImportResult> 
     groups.get(key)!.rows.push(r);
   }
 
-  // ── 3. Generate email & password per grup (kalau belum diisi manual) ──────
-  // FIX: basis email sekarang nama siswa, keunikan dicek ke seluruh DB +
-  // batch (lihat generateEmailUnikBatch).
   const assignedEmailsInBatch = new Set<string>();
   for (const [, group] of groups) {
     const explicitEmail = group.rows.find((r) => (r.email || "").trim())?.email?.trim();
@@ -812,7 +822,6 @@ export async function importUsersBulk(rows: ImportRow[]): Promise<ImportResult> 
 
   const groupToWaliId = new Map<string, string>();
 
-  // ── 4. Proses tiap baris ──────────────────────────────────────────────────
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const baris = i + 2;
@@ -826,9 +835,6 @@ export async function importUsersBulk(rows: ImportRow[]): Promise<ImportResult> 
     const existing = nis ? nisToExisting.get(nis) : undefined;
 
     if (existing) {
-      // ── MODE UPDATE: siswa lama, JANGAN sentuh akun/email — cuma field
-      // yang ADA ISINYA di file impor yang ditimpa, jadi impor ulang file
-      // yang datanya lebih lengkap otomatis melengkapi data lama. ────────
       const updatePayload: Record<string, any> = { updatedat: new Date().toISOString() };
 
       if (row.nama_siswa?.trim()) updatePayload.namasiswa = row.nama_siswa.trim();
@@ -838,6 +844,7 @@ export async function importUsersBulk(rows: ImportRow[]): Promise<ImportResult> 
       if (row.nama_wali?.trim()) updatePayload.namawali = row.nama_wali.trim();
       if (String(row.no_wa || "").trim()) updatePayload.nowa = row.no_wa;
       if (row.tempat_lahir?.trim()) updatePayload.tempatlahir = row.tempat_lahir.trim();
+      // row.tanggal_lahir sudah dinormalisasi ke ISO di awal fungsi ini
       if (row.tanggal_lahir?.trim()) updatePayload.tanggallahir = row.tanggal_lahir.trim();
       if (row.alamat?.trim()) updatePayload.alamat = row.alamat.trim();
       if (row.tipe_spp?.trim()) {
@@ -860,7 +867,6 @@ export async function importUsersBulk(rows: ImportRow[]): Promise<ImportResult> 
       continue;
     }
 
-    // ── MODE INSERT: siswa baru ───────────────────────────────────────────
     const key = familyKey(row);
     const group = groups.get(key)!;
 
