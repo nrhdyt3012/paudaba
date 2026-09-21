@@ -72,10 +72,9 @@ async function getTagihanPermission(supabase: any, idTagihan: string) {
 }
 
 // ─── Bayar Manual (cash ATAU transfer manual, boleh cicilan) ─────────────────
-// FIX: sekarang menerima juga `tipepembayaran` ("cash" | "transfer") dan
-// `buktipembayaranurl` (link gambar bukti transfer/pembayaran yang sudah
-// diunggah ke Supabase Storage sebelum action ini dipanggil — lihat
-// dialog-bayar-manual.tsx untuk alur upload-nya).
+// Menerima `tipepembayaran` ("cash" | "transfer") dan `buktipembayaranurl`
+// (link gambar bukti yang sudah diunggah ke Supabase Storage sebelum action
+// ini dipanggil — lihat dialog-bayar-manual.tsx untuk alur upload-nya).
 export async function bayarTagihanManual(prevState: any, formData: FormData) {
   const idTagihan = formData.get("idtagihansiswa") as string;
   const jumlahBayar = parseFloat(formData.get("jumlahbayar") as string);
@@ -218,7 +217,9 @@ export async function bayarTagihanManual(prevState: any, formData: FormData) {
   };
 }
 
-// ─── Delete Tagihan ───────────────────────────────────────────────────────────
+// ─── Delete Tagihan (dialog delete biasa, hanya untuk yang TANPA pembayaran) ──
+// Tetap dipertahankan seperti semula: menolak kalau sudah ada pembayaran
+// SUCCESS. Untuk tagihan berpembayaran, pakai deleteTagihanSiswaBatch(force).
 export async function deleteTagihanSiswa(prevState: any, formData: FormData) {
   const idTagihan = formData.get("idtagihansiswa") as string;
 
@@ -285,7 +286,7 @@ export async function deleteTagihanSiswa(prevState: any, formData: FormData) {
     }
   }
 
-  // FIX: Hapus snapshot dari rekapan_tunggakan sebelum menghapus tagihan
+  // Hapus snapshot dari rekapan_tunggakan sebelum menghapus tagihan
   // (untuk menghindari foreign key constraint error)
   await hapusRekapanTunggakan(supabase, parseInt(idTagihan));
 
@@ -311,6 +312,109 @@ export async function deleteTagihanSiswa(prevState: any, formData: FormData) {
 
   revalidatePath("/admin/tagihan");
   return { status: "success" };
+}
+
+// ─── Hapus tagihan (cascade) — dipakai untuk hapus biasa & hapus paksa ───────
+// Satu tagihan: cek permission → panggil RPC (transaksi atomik) → tulis changelog.
+async function hapusSatuTagihanCascade(
+  supabase: any,
+  idTagihan: number,
+  force: boolean
+): Promise<{ ok: boolean; message?: string }> {
+  const perm = await getTagihanPermission(supabase, String(idTagihan));
+  if (!perm.ok || !perm.tagihan) {
+    return { ok: false, message: perm.reason ?? "Tagihan tidak ditemukan" };
+  }
+
+  const tagihan: any = perm.tagihan;
+  const jumlahTerbayar = parseFloat(tagihan.jumlahterbayar ?? "0") || 0;
+  const pembayaranList: any[] = Array.isArray(tagihan.pembayaran)
+    ? tagihan.pembayaran
+    : tagihan.pembayaran
+    ? [tagihan.pembayaran]
+    : [];
+  const jumlahTransaksiSukses = pembayaranList.filter(
+    (p) => p.statuspembayaran === "SUCCESS"
+  ).length;
+
+  // Aturan ini harus sama dengan `needsStrongConfirm` di sisi client.
+  const needsStrongConfirm =
+    !!perm.hasSuccessPayment ||
+    jumlahTerbayar > 0 ||
+    tagihan.statuspembayaran !== "BELUM BAYAR";
+
+  // Penjaga di sisi server: tagihan berpembayaran WAJIB lewat konfirmasi khusus
+  if (needsStrongConfirm && !force) {
+    return {
+      ok: false,
+      message:
+        "Tagihan ini sudah memiliki riwayat pembayaran dan membutuhkan konfirmasi khusus.",
+    };
+  }
+
+  const { error } = await supabase.rpc("hapus_tagihan_siswa_cascade", {
+    p_idtagihan: idTagihan,
+  });
+
+  if (error) {
+    console.error("[hapusSatuTagihanCascade] RPC error:", error);
+    return { ok: false, message: error.message };
+  }
+
+  const namaSiswa = first(tagihan.siswa)?.namasiswa || "-";
+  const namaTagihan = tagihan.namatagihan || "-";
+
+  await writeChangelog({
+    supabase,
+    namamenu: "Tagihan Siswa",
+    jenisaksi: "HAPUS",
+    deskripsi: needsStrongConfirm
+      ? `[HAPUS PAKSA] Menghapus tagihan #${idTagihan} — ${namaSiswa}: ${namaTagihan} (${tagihan.bulan}/${tagihan.tahun}). ` +
+        `Status terakhir: ${tagihan.statuspembayaran}, sudah terbayar Rp${jumlahTerbayar.toLocaleString("id-ID")} ` +
+        `dari ${jumlahTransaksiSukses} transaksi berhasil. Seluruh data pembayaran & rekapan terkait ikut dihapus.`
+      : `Menghapus tagihan #${idTagihan} — ${namaSiswa}: ${namaTagihan} (${tagihan.bulan}/${tagihan.tahun})`,
+  });
+
+  return { ok: true };
+}
+
+// ─── Hapus banyak tagihan sekaligus (juga dipakai untuk hapus 1 tagihan) ─────
+export async function deleteTagihanSiswaBatch(ids: number[], force: boolean) {
+  const uniqueIds = Array.from(
+    new Set((ids ?? []).map(Number).filter((n) => Number.isInteger(n) && n > 0))
+  );
+
+  if (uniqueIds.length === 0) {
+    return {
+      status: "error" as const,
+      deleted: 0,
+      failed: [{ id: 0, message: "Tidak ada tagihan yang dipilih" }],
+    };
+  }
+
+  const supabase = await createClient({ isAdmin: true });
+
+  let deleted = 0;
+  const failed: { id: number; message: string }[] = [];
+
+  for (const id of uniqueIds) {
+    const res = await hapusSatuTagihanCascade(supabase, id, force);
+    if (res.ok) deleted++;
+    else failed.push({ id, message: res.message ?? "Gagal menghapus" });
+  }
+
+  revalidatePath("/admin/tagihan");
+  revalidatePath("/admin/rekapan-pembayaran");
+
+  return {
+    status: (failed.length === 0
+      ? "success"
+      : deleted > 0
+      ? "partial"
+      : "error") as "success" | "partial" | "error",
+    deleted,
+    failed,
+  };
 }
 
 // ─── Create Batch ─────────────────────────────────────────────────────────────
@@ -394,16 +498,12 @@ export async function createTagihanBatch(
     jumlahtagihan: masterTagihan.nominal,
     jumlahterbayar: 0,
     statuspembayaran: "BELUM BAYAR",
-    // FIX (bug yang kamu laporkan): "namatagihan" & "jenjang" di-SNAPSHOT
-    // ke tagihan_siswa saat diterbitkan, persis seperti "jumlahtagihan"
-    // yang sudah lebih dulu independen dari master_tagihan. Begitu
-    // tagihan ini dibuat, dia "berdiri sendiri" — kalau Master Tagihan-nya
-    // diedit belakangan (ganti nama/jenjang), tagihan yang SUDAH
+    // "namatagihan", "jenjang", dan "jenistagihan" di-SNAPSHOT ke
+    // tagihan_siswa saat diterbitkan, persis seperti "jumlahtagihan".
+    // Kalau Master Tagihan diedit belakangan, tagihan yang SUDAH
     // diterbitkan TIDAK ikut berubah.
     namatagihan: masterTagihan.namatagihan,
     jenjang: masterTagihan.jenjang,
-    // FIX: jenistagihan (Reguler/Subsidi) ikut di-snapshot juga sekarang,
-    // pola yang sama persis dengan namatagihan/jenjang.
     jenistagihan: masterTagihan.jenistagihan,
   }));
 

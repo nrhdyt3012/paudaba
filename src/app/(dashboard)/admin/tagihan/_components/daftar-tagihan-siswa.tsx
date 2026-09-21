@@ -17,7 +17,6 @@ import {
   Plus,
   Trash2,
   Banknote,
-  Lock,
   MessageSquare,
   Loader2,
   ChevronDown,
@@ -27,6 +26,8 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import DialogDeleteTagihanSiswa from "./dialog-delete-tagihan-siswa";
 import DialogBayarManual from "./dialog-bayar-manual";
+import DialogForceDeleteTagihan from "./dialog-force-delete-tagihan";
+import { deleteTagihanSiswaBatch } from "../actions";
 
 const BULAN_NAMA = [
   "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
@@ -62,6 +63,7 @@ function getTagihanPermissions(item: any) {
       p.metodepembayaran !== "transfer"
   );
   const hasAnySuccess = pembayaran.some((p) => p.statuspembayaran === "SUCCESS");
+  const jumlahTerbayar = parseFloat(item.jumlahterbayar) || 0;
 
   const successPembayaran = pembayaran.find((p) => p.statuspembayaran === "SUCCESS");
   const metodeLabel =
@@ -73,8 +75,11 @@ function getTagihanPermissions(item: any) {
 
   return {
     canBayarManual: !hasMidtrans && item.statuspembayaran !== "LUNAS",
-    // Boleh dihapus kalau belum pernah ada pembayaran SUCCESS sama sekali.
-    canDelete: !hasAnySuccess,
+    // Sudah ada pembayaran / bukan "BELUM BAYAR" → butuh dialog konfirmasi
+    // khusus. Aturan ini harus sama dengan yang ada di actions.ts.
+    needsStrongConfirm:
+      hasAnySuccess || jumlahTerbayar > 0 || item.statuspembayaran !== "BELUM BAYAR",
+    hasAnySuccess,
     hasMidtrans,
     metodeLabel,
   };
@@ -180,57 +185,65 @@ export default function DaftarTagihanSiswa() {
     },
   });
 
-const { data: tagihanList, isLoading } = useQuery({
-  queryKey: ["tagihan-siswa-list", currentPage, currentLimit, currentSearch, filterKelas, filterStatus],
-  queryFn: async () => {
-    // Cari dulu siswa yang namanya cocok, kalau ada kata kunci pencarian
-    let matchedSiswaIds: string[] = [];
-    if (currentSearch) {
-      const { data: siswaMatch } = await supabase
-        .from("siswa")
-        .select("id")
-        .ilike("namasiswa", `%${currentSearch}%`);
-      matchedSiswaIds = (siswaMatch || []).map((s) => s.id);
-    }
-
-    let query = supabase
-      .from("tagihan_siswa")
-      .select(
-        `*, siswa!idsiswa(id, namasiswa, kelas, nowa),
-        pembayaran(idpembayaran, statuspembayaran, metodepembayaran)`,
-        { count: "exact" }
-      );
-
-    if (filterStatus.length > 0) query = query.in("statuspembayaran", filterStatus);
-    if (filterKelas.length > 0) query = query.in("siswa.kelas", filterKelas);
-
-    if (currentSearch) {
-      // Sekarang semua kondisi di dalam .or() adalah kolom tabel utama
-      // (tagihan_siswa), bukan campuran dengan kolom tabel relasi.
-      const orParts = [`namatagihan.ilike.%${currentSearch}%`];
-      if (matchedSiswaIds.length > 0) {
-        orParts.push(`idsiswa.in.(${matchedSiswaIds.join(",")})`);
+  const { data: tagihanList, isLoading } = useQuery({
+    queryKey: ["tagihan-siswa-list", currentPage, currentLimit, currentSearch, filterKelas, filterStatus],
+    queryFn: async () => {
+      // Cari dulu siswa yang namanya cocok, kalau ada kata kunci pencarian
+      let matchedSiswaIds: string[] = [];
+      if (currentSearch) {
+        const { data: siswaMatch } = await supabase
+          .from("siswa")
+          .select("id")
+          .ilike("namasiswa", `%${currentSearch}%`);
+        matchedSiswaIds = (siswaMatch || []).map((s) => s.id);
       }
-      query = query.or(orParts.join(","));
-    }
 
-    const { data, count, error } = await query
-      .range((currentPage - 1) * currentLimit, currentPage * currentLimit - 1)
-      .order("createdat", { ascending: false });
+      let query = supabase
+        .from("tagihan_siswa")
+        .select(
+          `*, siswa!idsiswa(id, namasiswa, kelas, nowa),
+        pembayaran(idpembayaran, statuspembayaran, metodepembayaran)`,
+          { count: "exact" }
+        );
 
-    if (error) toast.error("Gagal memuat tagihan", { description: error.message });
+      if (filterStatus.length > 0) query = query.in("statuspembayaran", filterStatus);
+      if (filterKelas.length > 0) query = query.in("siswa.kelas", filterKelas);
 
-    let result = data || [];
-    if (filterKelas.length > 0) {
-      result = result.filter((item: any) => filterKelas.includes(item.siswa?.kelas));
-    }
+      if (currentSearch) {
+        // Semua kondisi di dalam .or() adalah kolom tabel utama
+        // (tagihan_siswa), bukan campuran dengan kolom tabel relasi.
+        const orParts = [`namatagihan.ilike.%${currentSearch}%`];
+        if (matchedSiswaIds.length > 0) {
+          orParts.push(`idsiswa.in.(${matchedSiswaIds.join(",")})`);
+        }
+        query = query.or(orParts.join(","));
+      }
 
-    return { data: result, count: count || 0 };
-  },
-});
+      const { data, count, error } = await query
+        .range((currentPage - 1) * currentLimit, currentPage * currentLimit - 1)
+        .order("createdat", { ascending: false });
+
+      if (error) toast.error("Gagal memuat tagihan", { description: error.message });
+
+      let result = data || [];
+      if (filterKelas.length > 0) {
+        result = result.filter((item: any) => filterKelas.includes(item.siswa?.kelas));
+      }
+
+      return { data: result, count: count || 0 };
+    },
+  });
 
   const [selectedAction, setSelectedAction] = useState<{ data: any; type: "bayar" | "delete" } | null>(null);
   const handleChangeAction = (open: boolean) => { if (!open) setSelectedAction(null); };
+
+  // ─── Dialog hapus paksa (untuk tagihan yang sudah ada pembayaran) ─────
+  const [forceDeleteOpen, setForceDeleteOpen] = useState(false);
+  const [forceDeleteItems, setForceDeleteItems] = useState<any[]>([]);
+  const openForceDelete = (items: any[]) => {
+    setForceDeleteItems(items);
+    setForceDeleteOpen(true);
+  };
 
   // ─── Seleksi baris untuk aksi massal ──────────────────────────────────
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
@@ -251,13 +264,13 @@ const { data: tagihanList, isLoading } = useQuery({
       })
       .subscribe();
     return () => { channel.unsubscribe(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const rawItems: any[] = tagihanList?.data || [];
 
-  // FIX: bukan reset total setiap ganti halaman/pencarian/filter, tapi
-  // sinkronisasi — id yang masih ada di hasil terbaru tetap dipertahankan,
-  // yang sudah tidak muncul lagi di tabel baru dibuang dari seleksi.
+  // Sinkronisasi seleksi: id yang masih ada di hasil terbaru tetap
+  // dipertahankan, yang sudah tidak muncul lagi dibuang dari seleksi.
   // Karena filter tidak bisa diubah selama mode pilih-banyak aktif (lihat
   // toolbar di bawah), efek ini praktis hanya berperan saat pindah halaman
   // atau ganti kata pencarian.
@@ -297,13 +310,12 @@ const { data: tagihanList, isLoading } = useQuery({
     [rawItems, selectedRows]
   );
 
-  // Hapus massal hanya boleh kalau SEMUA tagihan terpilih belum pernah
-  // punya riwayat pembayaran SUCCESS sama sekali.
-  const itemsNotDeletable = useMemo(
-    () => selectedItems.filter((item) => !getTagihanPermissions(item).canDelete),
+  // Ada minimal satu tagihan terpilih yang sudah punya pembayaran →
+  // hapus massal harus lewat dialog konfirmasi khusus.
+  const itemsNeedStrongConfirm = useMemo(
+    () => selectedItems.filter((item) => getTagihanPermissions(item).needsStrongConfirm),
     [selectedItems]
   );
-  const canBulkDelete = selectedItems.length > 0 && itemsNotDeletable.length === 0;
 
   // Reminder tunggakan hanya boleh kalau TIDAK ADA satupun tagihan
   // terpilih yang statusnya LUNAS. BELUM BAYAR & BELUM LUNAS boleh.
@@ -388,17 +400,15 @@ const { data: tagihanList, isLoading } = useQuery({
   };
 
   const handleHapusTerpilih = async () => {
-    if (!canBulkDelete) {
-      const namaSiswa = Array.from(
-        new Set(itemsNotDeletable.map((item) => item.siswa?.namasiswa || "siswa"))
-      ).join(", ");
-      toast.error(
-        `Tidak bisa menghapus: terdapat tagihan yang sudah memiliki riwayat pembayaran pada ${namaSiswa}. ` +
-          `Batalkan centang tagihan tersebut terlebih dahulu.`
-      );
+    if (selectedItems.length === 0) return;
+
+    // Ada tagihan yang sudah berpembayaran → dialog konfirmasi khusus
+    if (itemsNeedStrongConfirm.length > 0) {
+      openForceDelete(selectedItems);
       return;
     }
 
+    // Semua masih "BELUM BAYAR" tanpa pembayaran → konfirmasi biasa
     const ids = selectedItems.map((item) => item.idtagihansiswa);
     const confirmed = window.confirm(
       `Hapus ${ids.length} tagihan terpilih? Tindakan ini tidak bisa dibatalkan.`
@@ -406,16 +416,21 @@ const { data: tagihanList, isLoading } = useQuery({
     if (!confirmed) return;
 
     setIsBulkDeleting(true);
-    const { error } = await supabase.from("tagihan_siswa").delete().in("idtagihansiswa", ids);
-    setIsBulkDeleting(false);
-
-    if (error) {
-      toast.error("Gagal menghapus tagihan", { description: error.message });
-      return;
+    try {
+      const res = await deleteTagihanSiswaBatch(ids, false);
+      if (res.deleted > 0) toast.success(`${res.deleted} tagihan berhasil dihapus`);
+      if (res.failed.length > 0) {
+        toast.error(`${res.failed.length} tagihan gagal dihapus`, {
+          description: res.failed[0].message,
+        });
+      }
+    } catch (e: any) {
+      toast.error("Gagal menghapus tagihan", { description: e?.message });
+    } finally {
+      setIsBulkDeleting(false);
+      clearSelection();
+      invalidateTagihanQueries();
     }
-    toast.success(`${ids.length} tagihan berhasil dihapus`);
-    clearSelection();
-    invalidateTagihanQueries();
   };
 
   const filteredData = useMemo(() => {
@@ -463,9 +478,9 @@ const { data: tagihanList, isLoading } = useQuery({
           )}>
             {item.statuspembayaran}
           </span>
-          {!perms.canDelete && (
+          {perms.hasAnySuccess && (
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Lock className="w-3 h-3" />
+              <Banknote className="w-3 h-3" />
               {perms.metodeLabel}
             </span>
           )}
@@ -500,23 +515,21 @@ const { data: tagihanList, isLoading } = useQuery({
             {
               label: (
                 <span className="flex items-center gap-2">
-                  <Trash2 className={cn("w-4 h-4", perms.canDelete ? "text-red-400" : "text-gray-400")} />
-                  {perms.canDelete ? "Hapus" : "Hapus (Terkunci)"}
+                  <Trash2 className="w-4 h-4 text-red-400" />
+                  {perms.needsStrongConfirm ? "Hapus (Ada Pembayaran)" : "Hapus"}
                 </span>
               ),
-              variant: perms.canDelete ? "destructive" : "default",
+              variant: "destructive",
               action: () => {
-                if (!perms.canDelete) {
-                  toast.error("Tidak dapat menghapus tagihan yang sudah memiliki riwayat pembayaran");
-                  return;
-                }
-                setSelectedAction({ data: item, type: "delete" });
+                if (perms.needsStrongConfirm) openForceDelete([item]);
+                else setSelectedAction({ data: item, type: "delete" });
               },
             },
           ]}
         />,
       ];
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rawItems, currentLimit, currentPage, selectedRows]);
 
   return (
@@ -570,14 +583,11 @@ const { data: tagihanList, isLoading } = useQuery({
               onClick={handleHapusTerpilih}
               disabled={isBulkDeleting || isSendingReminder}
               title={
-                !canBulkDelete
-                  ? "Ada tagihan dengan riwayat pembayaran pada seleksi — klik untuk lihat detail"
+                itemsNeedStrongConfirm.length > 0
+                  ? `${itemsNeedStrongConfirm.length} tagihan sudah ada pembayaran — perlu konfirmasi khusus`
                   : undefined
               }
-              className={cn(
-                "border-red-200",
-                canBulkDelete ? "text-red-600 hover:bg-red-50" : "text-gray-400 opacity-50"
-              )}
+              className="border-red-200 text-red-600 hover:bg-red-50"
             >
               {isBulkDeleting ? (
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -682,6 +692,15 @@ const { data: tagihanList, isLoading } = useQuery({
         refetch={invalidateTagihanQueries}
         currentData={selectedAction?.data}
         handleChangeAction={handleChangeAction}
+      />
+      <DialogForceDeleteTagihan
+        open={forceDeleteOpen}
+        items={forceDeleteItems}
+        onOpenChange={setForceDeleteOpen}
+        onDeleted={() => {
+          clearSelection();
+          invalidateTagihanQueries();
+        }}
       />
     </div>
   );
