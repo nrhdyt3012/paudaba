@@ -1,9 +1,4 @@
 // PATH SARAN: app/admin/rekapan-pembayaran/impor-riwayat/page.tsx
-// Ini menggantikan dialog kecil sebelumnya — sekarang jadi halaman penuh
-// dengan 4 tahap yang sama: Master Tagihan -> Periode & Tanggal -> Pilih
-// Siswa -> Nominal, Tanggal & Metode per siswa. File import-riwayat-dialog.tsx
-// yang lama bisa dihapus kalau tombolnya di halaman Rekapan Pembayaran sudah
-// diarahkan ke route ini (lihat revisi rekapan-pembayaran-page.tsx).
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -33,14 +28,12 @@ import {
   Search,
   Check,
   ChevronsUpDown,
-  History,
   Users,
   CalendarDays,
   ArrowLeft,
   Wallet,
 } from "lucide-react";
 import { convertIDR } from "@/lib/utils";
-// Sesuaikan path ini dengan lokasi file actions.ts (lihat rekapan-pembayaran-actions.ts)
 import { importRiwayatPembayaran } from "@/app/(dashboard)/admin/rekapan-pembayaran/actions";
 
 const BULAN_NAMA = [
@@ -60,8 +53,6 @@ const KELAS_OPTIONS = [
   { value: "TK B", label: "TK B" },
 ];
 
-// BARU: metode pembayaran untuk data impor — cuma 2 opsi, sama seperti
-// metode pembayaran normal di sistem (cash / transfer).
 const METODE_OPTIONS = [
   { value: "cash", label: "Cash" },
   { value: "transfer", label: "Transfer" },
@@ -69,15 +60,6 @@ const METODE_OPTIONS = [
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
-// BARU: pengganti <input type="date"> bawaan browser. Native date picker
-// menampilkan teks sesuai locale browser/OS pengguna (bisa MM/DD/YYYY di
-// sebagian browser) dan itu TIDAK bisa dipaksa lewat atribut HTML apa pun
-// (termasuk `lang`) — jadi biar kalender tetap ada (bisa klik tanggal,
-// tombol "Hari Ini", dst.) tapi teks yang tampil di kotaknya dijamin selalu
-// dd/MM/yyyy, kalender ini dibuat sendiri pakai Popover + Calendar dari
-// shadcn/ui, lalu label tombolnya diformat manual dengan date-fns.
-// Value & onChange tetap pakai string ISO (yyyy-mm-dd) supaya kompatibel
-// dengan sisa kode yang sudah ada.
 function TanggalInputID({
   value,
   onChange,
@@ -108,9 +90,6 @@ function TanggalInputID({
           className={`w-full justify-start font-normal ${compact ? "h-8 text-sm px-2" : "h-9"}`}
         >
           <CalendarDays className="mr-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          {/* BARU: diformat manual dd/MM/yyyy — tidak pernah ikut locale
-              browser, jadi klik "Hari Ini" pun tetap tampil 10/09/2026,
-              bukan 09/10/2026. */}
           {dateValue ? format(dateValue, "dd/MM/yyyy") : "Pilih tanggal"}
         </Button>
       </PopoverTrigger>
@@ -143,8 +122,8 @@ type RowInput = {
   namaSiswa: string;
   kelas: string;
   nominal: string;
+  nominalEdited: boolean; // BARU
   tanggal: string;
-  // BARU: metode pembayaran per siswa/baris
   metode: MetodePembayaran;
 };
 
@@ -155,26 +134,24 @@ export default function ImporRiwayatPembayaranPage() {
 
   const [isPending, setIsPending] = useState(false);
 
-  // Step 1 — Master Tagihan
+  // Step 1
   const [selectedMaster, setSelectedMaster] = useState("");
   const [searchMaster, setSearchMaster] = useState("");
   const [showDropdownMaster, setShowDropdownMaster] = useState(false);
   const dropdownMasterRef = useRef<HTMLDivElement>(null);
 
-  // Step 2 — Periode & tanggal default
+  // Step 2
   const [selectedBulan, setSelectedBulan] = useState(new Date().getMonth() + 1);
   const [selectedTahun, setSelectedTahun] = useState(new Date().getFullYear());
   const [globalTanggal, setGlobalTanggal] = useState(todayIso());
-  // BARU: metode default (dipakai saat baris baru pertama kali dibuat &
-  // untuk tombol "Terapkan ke semua baris")
   const [globalMetode, setGlobalMetode] = useState<MetodePembayaran>("cash");
 
-  // Step 3 — Pilih siswa
+  // Step 3
   const [filterKelas, setFilterKelas] = useState("semua");
   const [searchSiswa, setSearchSiswa] = useState("");
   const [selectedSiswa, setSelectedSiswa] = useState<string[]>([]);
 
-  // Step 4 — baris nominal, tanggal & metode per siswa terpilih
+  // Step 4
   const [rows, setRows] = useState<RowInput[]>([]);
 
   useEffect(() => {
@@ -190,7 +167,7 @@ export default function ImporRiwayatPembayaranPage() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // ─── Data: master tagihan (searchable) ─────────────────────────────────
+  // ─── Data: master tagihan ──────────────────────────────────────────────
   const { data: masterList, isLoading: loadingMaster } = useQuery({
     queryKey: ["master-tagihan-impor-riwayat"],
     queryFn: async () => {
@@ -217,7 +194,7 @@ export default function ImporRiwayatPembayaranPage() {
     );
   }, [masterList, searchMaster]);
 
-  // ─── Data: siswa aktif (TIDAK difilter "sudah punya tagihan atau belum") ─
+  // ─── Data: siswa aktif ─────────────────────────────────────────────────
   const { data: siswaList, isLoading: loadingSiswa } = useQuery({
     queryKey: ["siswa-impor-riwayat", filterKelas, searchSiswa],
     enabled: !!selectedMaster,
@@ -236,11 +213,13 @@ export default function ImporRiwayatPembayaranPage() {
     },
   });
 
-  // ─── Data: status tagihan yang sudah ada, untuk badge, default nominal,
-  // dan untuk menentukan siswa mana yang sudah LUNAS (di-disable) ─────────
-  const { data: existingTagihanMap } = useQuery({
+  // ─── Data: tagihan existing (REVISI: selalu segar) ─────────────────────
+  const { data: existingTagihanMap, isFetching: fetchingExisting } = useQuery({
     queryKey: ["tagihan-existing-impor-riwayat", selectedMaster, selectedBulan, selectedTahun],
     enabled: !!selectedMaster,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnMount: "always",
     queryFn: async () => {
       const { data } = await supabase
         .from("tagihan_siswa")
@@ -266,38 +245,48 @@ export default function ImporRiwayatPembayaranPage() {
     return groups;
   }, [siswaList]);
 
-  // BARU: helper — siswa dianggar tidak bisa dipilih kalau tagihan untuk
-  // kombinasi master/bulan/tahun yang sedang aktif sudah berstatus LUNAS.
   const isSiswaLunas = (idsiswa: string) =>
     existingTagihanMap?.[idsiswa]?.statuspembayaran === "LUNAS";
 
-  // ─── Sinkronkan rows setiap kali daftar siswa terpilih berubah ────────
+  // BARU: total & sisa tagihan per siswa
+  const getTotalTagihan = (idsiswa: string) => {
+    const existing = existingTagihanMap?.[idsiswa];
+    return parseFloat(existing?.jumlahtagihan ?? masterSelected?.nominal ?? "0");
+  };
+
+  const getSisaTagihan = (idsiswa: string) => {
+    const existing = existingTagihanMap?.[idsiswa];
+    const terbayar = parseFloat(existing?.jumlahterbayar || "0");
+    return Math.max(0, getTotalTagihan(idsiswa) - terbayar);
+  };
+
+  // ─── Sinkronkan rows (REVISI: tunggu data siap, ikuti sisa terbaru) ────
   useEffect(() => {
+    if (!selectedMaster || fetchingExisting || !existingTagihanMap) return;
+
     setRows((prev) => {
       const prevMap = new Map(prev.map((r) => [r.siswaId, r]));
       return selectedSiswa.map((id) => {
-        if (prevMap.has(id)) return prevMap.get(id)!;
+        const sisa = getSisaTagihan(id).toString();
+        const old = prevMap.get(id);
+        if (old) {
+          return old.nominalEdited ? old : { ...old, nominal: sisa };
+        }
         const siswa = (siswaList || []).find((s: any) => s.id === id);
-        const existing = existingTagihanMap?.[id];
-        const totalTagihan = parseFloat(masterSelected?.nominal || "0");
-        const sudahDibayar = existing ? parseFloat(existing.jumlahterbayar || "0") : 0;
-        const sisaDefault = Math.max(0, totalTagihan - sudahDibayar);
         return {
           siswaId: id,
           namaSiswa: siswa?.namasiswa || "-",
           kelas: siswa?.kelas || "-",
-          nominal: (sisaDefault > 0 ? sisaDefault : totalTagihan).toString(),
+          nominal: sisa,
+          nominalEdited: false,
           tanggal: globalTanggal,
           metode: globalMetode,
         };
       });
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     });
-  }, [selectedSiswa, masterSelected, existingTagihanMap, siswaList]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSiswa, masterSelected, existingTagihanMap, fetchingExisting, siswaList]);
 
-  // BARU: kalau existingTagihanMap berubah (ganti master/bulan/tahun) dan
-  // ternyata ada siswa yang SUDAH terpilih tapi statusnya sekarang LUNAS,
-  // keluarkan otomatis dari seleksi — supaya tidak nyangkut sampai Step 4.
   useEffect(() => {
     if (!existingTagihanMap) return;
     setSelectedSiswa((prev) => prev.filter((id) => !isSiswaLunas(id)));
@@ -309,11 +298,8 @@ export default function ImporRiwayatPembayaranPage() {
     setSearchMaster("");
     setShowDropdownMaster(false);
     setSelectedSiswa([]);
+    setRows([]);
 
-    // BARU: otomatis sesuaikan filter kelas di Step 3 dengan jenjang pada
-    // master tagihan yang dipilih (KB / TK A / TK B). Kalau jenjang master
-    // tidak cocok salah satu kelas yang ada, filter dikembalikan ke
-    // "Semua Kelas" supaya tidak salah menyembunyikan siswa.
     const jenjangMaster = (master.jenjang || "").trim().toUpperCase();
     const kelasCocok = KELAS_OPTIONS.find(
       (opt) => opt.value !== "semua" && opt.value.toUpperCase() === jenjangMaster
@@ -328,7 +314,6 @@ export default function ImporRiwayatPembayaranPage() {
     setRows([]);
   };
 
-  // BARU: siswa berstatus LUNAS tidak bisa ditoggle sama sekali.
   const handleToggleSiswa = (id: string) => {
     if (isSiswaLunas(id)) return;
     setSelectedSiswa((prev) =>
@@ -336,8 +321,6 @@ export default function ImporRiwayatPembayaranPage() {
     );
   };
 
-  // BARU: "pilih semua per kelas" hanya menghitung & menyeleksi siswa yang
-  // belum LUNAS — siswa LUNAS dilewati sepenuhnya.
   const handleSelectKelas = (kelas: string) => {
     const idsSelectable = (siswaByKelas[kelas] || [])
       .map((s: any) => s.id)
@@ -361,12 +344,17 @@ export default function ImporRiwayatPembayaranPage() {
     setRows((prev) => prev.map((r) => ({ ...r, tanggal: globalTanggal })));
   };
 
+  // REVISI: isi dengan sisa tagihan per siswa
   const applyNominalPenuhKeSemua = () => {
-    const totalTagihan = parseFloat(masterSelected?.nominal || "0");
-    setRows((prev) => prev.map((r) => ({ ...r, nominal: totalTagihan.toString() })));
+    setRows((prev) =>
+      prev.map((r) => ({
+        ...r,
+        nominal: getSisaTagihan(r.siswaId).toString(),
+        nominalEdited: false,
+      }))
+    );
   };
 
-  // BARU: terapkan metode default (dari Step 2) ke semua baris di Step 4
   const applyMetodeKeSemua = () => {
     setRows((prev) => prev.map((r) => ({ ...r, metode: globalMetode })));
   };
@@ -392,6 +380,18 @@ export default function ImporRiwayatPembayaranPage() {
       toast.error(`Nominal, tanggal, atau metode untuk ${rowTidakValid.namaSiswa} belum valid`);
       return;
     }
+    // BARU: tolak nominal melebihi sisa tagihan
+    const rowMelebihiSisa = rows.find(
+      (r) => parseFloat(r.nominal) > getSisaTagihan(r.siswaId)
+    );
+    if (rowMelebihiSisa) {
+      toast.error(
+        `Nominal ${rowMelebihiSisa.namaSiswa} melebihi sisa tagihan (${convertIDR(
+          getSisaTagihan(rowMelebihiSisa.siswaId)
+        )})`
+      );
+      return;
+    }
 
     setIsPending(true);
     const result = await importRiwayatPembayaran({
@@ -402,9 +402,6 @@ export default function ImporRiwayatPembayaranPage() {
         idsiswa: r.siswaId,
         jumlahdibayar: parseFloat(r.nominal),
         tanggalpembayaran: new Date(r.tanggal).toISOString(),
-        // BARU: metode pembayaran per siswa dikirim ke server, menggantikan
-        // metode statis "import data lama" — datanya sekarang konsisten
-        // dengan pembayaran normal yang cuma punya 2 opsi: cash / transfer.
         metodepembayaran: r.metode,
       })),
     });
@@ -428,13 +425,14 @@ export default function ImporRiwayatPembayaranPage() {
     queryClient.invalidateQueries({ queryKey: ["chart-pembayaran"] });
     queryClient.invalidateQueries({ queryKey: ["rekapan-tunggakan"] });
     queryClient.invalidateQueries({ queryKey: ["chart-tunggakan"] });
+    queryClient.invalidateQueries({ queryKey: ["tagihan-existing-impor-riwayat"] }); // BARU
 
     router.push("/admin/rekapan-pembayaran");
   };
 
   return (
     <div className="w-full space-y-6 pb-10">
-      {/* ─── Header ──────────────────────────────────────────────────────── */}
+      {/* Header */}
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => router.push("/admin/rekapan-pembayaran")}>
           <ArrowLeft className="h-5 w-5" />
@@ -532,7 +530,7 @@ export default function ImporRiwayatPembayaranPage() {
         </CardContent>
       </Card>
 
-      {/* Step 2 — Periode, tanggal & metode default */}
+      {/* Step 2 */}
       {selectedMaster && (
         <Card className="gap-3">
           <CardHeader className="pb-1">
@@ -601,7 +599,7 @@ export default function ImporRiwayatPembayaranPage() {
         </Card>
       )}
 
-      {/* Step 3 — Pilih siswa */}
+      {/* Step 3 */}
       {selectedMaster && (
         <Card className="gap-3">
           <CardHeader className="pb-1">
@@ -633,7 +631,6 @@ export default function ImporRiwayatPembayaranPage() {
                 </div>
               </div>
             </div>
-            {/* BARU: penjelasan singkat kenapa sebagian siswa tampak pudar */}
             <p className="text-[11px] text-muted-foreground mt-1">
               Siswa yang sudah <span className="font-medium">Lunas</span> untuk periode & tagihan ini otomatis dipudarkan dan tidak bisa dipilih.
             </p>
@@ -712,7 +709,7 @@ export default function ImporRiwayatPembayaranPage() {
         </Card>
       )}
 
-      {/* Step 4 — Nominal, Tanggal & Metode per siswa */}
+      {/* Step 4 */}
       {rows.length > 0 && (
         <Card className="gap-3">
           <CardHeader className="pb-1">
@@ -722,18 +719,16 @@ export default function ImporRiwayatPembayaranPage() {
                 Nominal, Tanggal & Metode per Siswa
               </CardTitle>
               <Button type="button" variant="outline" size="sm" onClick={applyNominalPenuhKeSemua}>
-                Isi nominal penuh untuk semua
+                Isi sisa tagihan untuk semua
               </Button>
             </div>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
               {rows.map((r) => {
-                const totalTagihan = parseFloat(masterSelected?.nominal || "0");
-                const existing = existingTagihanMap?.[r.siswaId];
-                const sudahDibayarSebelumnya = existing ? parseFloat(existing.jumlahterbayar || "0") : 0;
+                const sisaAwal = getSisaTagihan(r.siswaId);
                 const nominalNum = parseFloat(r.nominal) || 0;
-                const sisaSetelah = Math.max(0, totalTagihan - sudahDibayarSebelumnya - nominalNum);
+                const sisaSetelah = Math.max(0, sisaAwal - nominalNum);
                 const lunas = sisaSetelah <= 0;
                 return (
                   <div
@@ -743,6 +738,9 @@ export default function ImporRiwayatPembayaranPage() {
                     <div className="col-span-2 sm:col-span-1">
                       <Label className="text-[11px] text-muted-foreground">Siswa</Label>
                       <p className="text-sm font-medium truncate">{r.namaSiswa}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Sisa sebelum bayar: {convertIDR(sisaAwal)}
+                      </p>
                     </div>
                     <div className="space-y-1">
                       <Label className="text-[11px] text-muted-foreground">Nominal</Label>
@@ -750,7 +748,9 @@ export default function ImporRiwayatPembayaranPage() {
                         type="number"
                         min={1}
                         value={r.nominal}
-                        onChange={(e) => updateRow(r.siswaId, { nominal: e.target.value })}
+                        onChange={(e) =>
+                          updateRow(r.siswaId, { nominal: e.target.value, nominalEdited: true })
+                        }
                         className="h-8 text-sm"
                       />
                     </div>
@@ -787,7 +787,7 @@ export default function ImporRiwayatPembayaranPage() {
         </Card>
       )}
 
-      {/* ─── Footer aksi ─────────────────────────────────────────────────── */}
+      {/* Footer aksi */}
       <div className="border-t bg-background/95 backdrop-blur-sm px-4 py-3 rounded-lg">
         <div className="flex items-center justify-end gap-4 flex-wrap">
           {rows.length > 0 && (
