@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { createClient } from "@/lib/supabase/client";
 import { convertIDR } from "@/lib/utils";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronLeft,
   ChevronRight,
@@ -24,6 +24,7 @@ import {
   Search,
   Infinity as InfinityIcon,
   History,
+  MessageCircle,
 } from "lucide-react";
 import { useMemo, useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
@@ -202,10 +203,13 @@ function ActionMenuRekap({
 }) {
   const contentRef = useRef<HTMLDivElement>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
+  const queryClient = useQueryClient();
+  const [sendingWA, setSendingWA] = useState(false);
 
   const tagihan = first(item.tagihan_siswa);
   const siswa = first(tagihan?.siswa);
   const hasBukti = !!item.bukti_pembayaran_url;
+  const sudahDikirim = !!item.whatsapp_status_notified_at;
 
   const handlePrint = useReactToPrint({
     contentRef,
@@ -275,6 +279,39 @@ function ActionMenuRekap({
     onPreviewBukti(item.bukti_pembayaran_url);
   };
 
+  const handleKirimWA = async () => {
+    if (sendingWA) return;
+
+    const namaWali = siswa?.namawali || "wali murid";
+    const pesan = sudahDikirim
+      ? `Kwitansi ini sudah pernah dikirim ke ${namaWali}. Kirim ulang?`
+      : `Kirim kwitansi ke WhatsApp ${namaWali}?`;
+    if (!window.confirm(pesan)) return;
+
+    setSendingWA(true);
+    const toastId = toast.loading("Mengirim kwitansi ke WhatsApp...");
+    try {
+      const res = await fetch("/api/notifications/send-payment-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          idPembayaran: item.idpembayaran,
+          idTagihan: item.idtagihansiswa,
+          status: "SUCCESS",
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Gagal mengirim notifikasi");
+
+      toast.success("Kwitansi terkirim ke WhatsApp wali", { id: toastId });
+      queryClient.invalidateQueries({ queryKey: ["rekapan-pembayaran"] });
+    } catch (e: any) {
+      toast.error("Gagal kirim WA", { description: e.message, id: toastId });
+    } finally {
+      setSendingWA(false);
+    }
+  };
+
   return (
     <>
       {/* FIX: pakai DropdownAction (titik 3) yang sama dengan halaman lain,
@@ -300,6 +337,15 @@ function ActionMenuRekap({
               </span>
             ),
             action: handleLihatBukti,
+          },
+           {
+            label: (
+              <span className={`flex items-center gap-2 ${sendingWA ? "opacity-40" : ""}`}>
+                <MessageCircle className="w-4 h-4" />
+                {sudahDikirim ? "Kirim Ulang ke WA" : "Kirim ke WA"}
+              </span>
+            ),
+            action: handleKirimWA,
           },
         ]}
       />
@@ -640,25 +686,26 @@ export default function RekapanPembayaran() {
     queryFn: async () => {
       let query = supabase
         .from("pembayaran")
-        .select(`
-          idpembayaran,
-          idtagihansiswa,
-          jumlahdibayar,
-          tanggalpembayaran,
-          metodepembayaran,
-          statuspembayaran,
-          sisa_setelah_transaksi_ini,
-          bukti_pembayaran_url,
-          tagihan_siswa:tagihan_siswa!idtagihansiswa(
-            bulan,
-            tahun,
-            jumlahtagihan,
-            namatagihan,
-            jenjang,
-            jenistagihan,
-            siswa:siswa!idsiswa(id, namasiswa, kelas, namawali)
-          )
-        `)
+.select(`
+  idpembayaran,
+  idtagihansiswa,
+  jumlahdibayar,
+  tanggalpembayaran,
+  metodepembayaran,
+  statuspembayaran,
+  sisa_setelah_transaksi_ini,
+  bukti_pembayaran_url,
+  whatsapp_status_notified_at,
+  tagihan_siswa:tagihan_siswa!idtagihansiswa(
+    bulan,
+    tahun,
+    jumlahtagihan,
+    namatagihan,
+    jenjang,
+    jenistagihan,
+    siswa:siswa!idsiswa(id, namasiswa, kelas, namawali)
+  )
+`)
         .eq("statuspembayaran", "SUCCESS")
         .order("tanggalpembayaran", { ascending: false });
 
