@@ -59,6 +59,7 @@ import LaporanRiwayatTemplate, {
 // tidak ada lagi dua queryFn berbeda yang berebut satu queryKey (penyebab
 // kwitansi kadang nampilin "-" walau data di Supabase sudah benar).
 import { usePengaturanSekolah } from "@/hooks/use-pengaturan-sekolah";
+import DialogKirimWhatsApp from "@/components/common/dialog-kirim-whatsapp";
 
 const BULAN_NAMA = [
   "",
@@ -192,6 +193,7 @@ const MonthYearPicker = ({
 };
 
 // ─── Menu Aksi per transaksi (Cetak Kwitansi + Lihat Bukti Pembayaran) ─────────
+// ─── Menu Aksi per transaksi (Cetak Kwitansi + Lihat Bukti + Kirim WA) ─────────
 function ActionMenuRekap({
   item,
   sekolah,
@@ -205,6 +207,7 @@ function ActionMenuRekap({
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
   const queryClient = useQueryClient();
   const [sendingWA, setSendingWA] = useState(false);
+  const [openWA, setOpenWA] = useState(false);
 
   const tagihan = first(item.tagihan_siswa);
   const siswa = first(tagihan?.siswa);
@@ -233,8 +236,7 @@ function ActionMenuRekap({
     // generateQrCodeDataUrl(linkKwitansi).then(setQrCodeDataUrl);
   }, [item.idpembayaran]);
 
-  // FIX: fallback aman kalau data pengaturan sekolah belum termuat/kosong,
-  // biar komponen kwitansi tidak crash saat namaSekolah dsb. undefined
+  // Fallback aman kalau data pengaturan sekolah belum termuat/kosong
   const sekolahData: SekolahInfo = {
     namaSekolah: sekolah?.namaSekolah || "-",
     alamatSekolah: sekolah?.alamatSekolah || "-",
@@ -265,12 +267,8 @@ function ActionMenuRekap({
     isLunas,
     qrCodeDataUrl,
     sekolah: sekolahData,
-    // Catatan: daftar "tagihan lain yang belum lunas" tidak disertakan di sini
-    // karena butuh query tambahan per siswa. Bisa ditambahkan kalau perlu.
   };
 
-  // Kalau tidak ada bukti pembayaran, opsi tetap tampil (memudar) tapi
-  // tetap bisa diklik dan akan menampilkan toast pemberitahuan.
   const handleLihatBukti = () => {
     if (!hasBukti) {
       toast.error("Tidak ada bukti pembayaran untuk transaksi ini");
@@ -279,17 +277,15 @@ function ActionMenuRekap({
     onPreviewBukti(item.bukti_pembayaran_url);
   };
 
+  // Menu hanya membuka dialog; pengiriman terjadi setelah dikonfirmasi
+  const handleBukaDialogWA = () => {
+    if (sendingWA) return;
+    setOpenWA(true);
+  };
+
   const handleKirimWA = async () => {
     if (sendingWA) return;
-
-    const namaWali = siswa?.namawali || "wali murid";
-    const pesan = sudahDikirim
-      ? `Kwitansi ini sudah pernah dikirim ke ${namaWali}. Kirim ulang?`
-      : `Kirim kwitansi ke WhatsApp ${namaWali}?`;
-    if (!window.confirm(pesan)) return;
-
     setSendingWA(true);
-    const toastId = toast.loading("Mengirim kwitansi ke WhatsApp...");
     try {
       const res = await fetch("/api/notifications/send-payment-status", {
         method: "POST",
@@ -303,10 +299,13 @@ function ActionMenuRekap({
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Gagal mengirim notifikasi");
 
-      toast.success("Kwitansi terkirim ke WhatsApp wali", { id: toastId });
+      toast.success(
+        `Kwitansi ${siswa?.namasiswa || "siswa"} terkirim ke WhatsApp wali`
+      );
+      setOpenWA(false);
       queryClient.invalidateQueries({ queryKey: ["rekapan-pembayaran"] });
     } catch (e: any) {
-      toast.error("Gagal kirim WA", { description: e.message, id: toastId });
+      toast.error("Gagal kirim WA", { description: e.message });
     } finally {
       setSendingWA(false);
     }
@@ -314,8 +313,6 @@ function ActionMenuRekap({
 
   return (
     <>
-      {/* FIX: pakai DropdownAction (titik 3) yang sama dengan halaman lain,
-          bukan bikin dropdown sendiri, biar konsisten sama menu-management dkk */}
       <DropdownAction
         menu={[
           {
@@ -329,8 +326,6 @@ function ActionMenuRekap({
           },
           {
             label: (
-              // Kalau tidak ada bukti, opsi ini memudar tapi tetap bisa
-              // diklik -> munculkan toast lewat handleLihatBukti di bawah
               <span className={`flex items-center gap-2 ${!hasBukti ? "opacity-40" : ""}`}>
                 <ImageIcon className="w-4 h-4" />
                 Lihat Bukti Pembayaran
@@ -338,16 +333,41 @@ function ActionMenuRekap({
             ),
             action: handleLihatBukti,
           },
-           {
+          {
             label: (
               <span className={`flex items-center gap-2 ${sendingWA ? "opacity-40" : ""}`}>
                 <MessageCircle className="w-4 h-4" />
                 {sudahDikirim ? "Kirim Ulang ke WA" : "Kirim ke WA"}
               </span>
             ),
-            action: handleKirimWA,
+            action: handleBukaDialogWA,
           },
         ]}
+      />
+
+      {/* Dialog konfirmasi kirim WhatsApp */}
+      <DialogKirimWhatsApp
+        open={openWA}
+        onOpenChange={setOpenWA}
+        onSubmit={handleKirimWA}
+        isLoading={sendingWA}
+        namaSiswa={siswa?.namasiswa || "-"}
+        kelas={siswa?.kelas}
+        namaTagihan={tagihan?.namatagihan}
+        jumlahDibayar={convertIDR(jumlahBayar)}
+        sisaText={
+          item.sisa_setelah_transaksi_ini != null
+            ? isLunas
+              ? "Lunas"
+              : convertIDR(sisaSetelahIni)
+            : undefined
+        }
+        sudahPernahDikirim={sudahDikirim}
+        tanggalKirimSebelumnya={
+          item.whatsapp_status_notified_at
+            ? new Date(item.whatsapp_status_notified_at).toLocaleString("id-ID")
+            : null
+        }
       />
 
       {/* Konten cetak kwitansi, disembunyikan, dipicu lewat handlePrint */}
@@ -643,6 +663,7 @@ function CetakRiwayatSiswaRunner({
 }
 
 // ─── Komponen Utama ────────────────────────────────────────────────────────────
+// ─── Komponen Utama ────────────────────────────────────────────────────────────
 export default function RekapanPembayaran() {
   const supabase = createClient();
   const router = useRouter();
@@ -653,7 +674,7 @@ export default function RekapanPembayaran() {
   const [buktiPreviewUrl, setBuktiPreviewUrl] = useState<string | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
 
-  // BARU: pencarian & pagination untuk tabel transaksi
+  // Pencarian & pagination untuk tabel transaksi
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
 
@@ -667,8 +688,7 @@ export default function RekapanPembayaran() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // BARU: reset ke halaman 1 setiap kali pencarian atau periode berubah,
-  // supaya tidak "nyangkut" di halaman kosong
+  // Reset ke halaman 1 setiap kali pencarian atau periode berubah
   useEffect(() => {
     setPage(1);
   }, [searchQuery, selectedMonth, selectedYear, isAllTime]);
@@ -686,26 +706,26 @@ export default function RekapanPembayaran() {
     queryFn: async () => {
       let query = supabase
         .from("pembayaran")
-.select(`
-  idpembayaran,
-  idtagihansiswa,
-  jumlahdibayar,
-  tanggalpembayaran,
-  metodepembayaran,
-  statuspembayaran,
-  sisa_setelah_transaksi_ini,
-  bukti_pembayaran_url,
-  whatsapp_status_notified_at,
-  tagihan_siswa:tagihan_siswa!idtagihansiswa(
-    bulan,
-    tahun,
-    jumlahtagihan,
-    namatagihan,
-    jenjang,
-    jenistagihan,
-    siswa:siswa!idsiswa(id, namasiswa, kelas, namawali)
-  )
-`)
+        .select(`
+          idpembayaran,
+          idtagihansiswa,
+          jumlahdibayar,
+          tanggalpembayaran,
+          metodepembayaran,
+          statuspembayaran,
+          sisa_setelah_transaksi_ini,
+          bukti_pembayaran_url,
+          whatsapp_status_notified_at,
+          tagihan_siswa:tagihan_siswa!idtagihansiswa(
+            bulan,
+            tahun,
+            jumlahtagihan,
+            namatagihan,
+            jenjang,
+            jenistagihan,
+            siswa:siswa!idsiswa(id, namasiswa, kelas, namawali)
+          )
+        `)
         .eq("statuspembayaran", "SUCCESS")
         .order("tanggalpembayaran", { ascending: false });
 
@@ -781,9 +801,7 @@ export default function RekapanPembayaran() {
     [pembayaranData]
   );
 
-  // BARU: filter client-side berdasarkan nama siswa, kelas, atau nama
-  // tagihan. Data satu periode/all-time sudah ada di memori (query di
-  // atas), jadi tidak perlu round-trip lagi ke Supabase tiap ketikan.
+  // Filter client-side: nama siswa, kelas, atau nama tagihan
   const filteredData = useMemo(() => {
     if (!pembayaranData) return [];
     const q = searchQuery.trim().toLowerCase();
@@ -823,9 +841,7 @@ export default function RekapanPembayaran() {
   };
 
   const handleExport = () => {
-    // BARU: export mengikuti hasil pencarian yang sedang aktif (bukan
-    // cuma halaman yang sedang tampil), supaya konsisten dengan yang
-    // dilihat bendahara di layar.
+    // Export mengikuti hasil pencarian yang sedang aktif
     if (!filteredData.length) { toast.error("Tidak ada data"); return; }
     const rows = filteredData.map((item: any, i: number) => {
       const tagihan = first(item.tagihan_siswa);
@@ -925,8 +941,6 @@ export default function RekapanPembayaran() {
           <ChevronRight className="h-4 w-4" />
         </Button>
 
-        {/* BARU: tombol Impor Riwayat sekarang navigasi ke halaman penuh,
-            bukan membuka dialog kecil */}
         <div className="ml-auto flex items-center gap-2">
           <Button
             variant="outline"
@@ -962,41 +976,39 @@ export default function RekapanPembayaran() {
       </div>
 
       <Card>
-        {/* Satu baris: judul di kiri, kolom pencarian di tengah, tombol
-            Export Excel di kanan. */}
-<CardHeader>
-  <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
-    <CardTitle className="shrink-0">
-      Daftar Transaksi Pembayaran
-      <span className="ml-2 text-sm font-normal text-muted-foreground">
-        {isAllTime ? "Semua Waktu" : `${BULAN_NAMA[selectedMonth]} ${selectedYear}`}
-      </span>
-    </CardTitle>
+        <CardHeader>
+          <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+            <CardTitle className="shrink-0">
+              Daftar Transaksi Pembayaran
+              <span className="ml-2 text-sm font-normal text-muted-foreground">
+                {isAllTime ? "Semua Waktu" : `${BULAN_NAMA[selectedMonth]} ${selectedYear}`}
+              </span>
+            </CardTitle>
 
-    <div className="flex items-center gap-2 ml-auto w-full sm:w-auto order-3 sm:order-none">
-      <div className="relative w-full sm:w-64">
-        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Cari nama siswa, kelas, atau nama tagihan..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-8 h-9 text-sm"
-        />
-      </div>
+            <div className="flex items-center gap-2 ml-auto w-full sm:w-auto order-3 sm:order-none">
+              <div className="relative w-full sm:w-64">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Cari nama siswa, kelas, atau nama tagihan..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8 h-9 text-sm"
+                />
+              </div>
 
-      <Button
-        onClick={handleExport}
-        disabled={!filteredData.length}
-        variant="outline"
-        size="sm"
-        className="shrink-0"
-      >
-        <Download className="mr-2 h-4 w-4" />
-        Export Excel
-      </Button>
-    </div>
-  </div>
-</CardHeader>
+              <Button
+                onClick={handleExport}
+                disabled={!filteredData.length}
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+              >
+                <Download className="mr-2 h-4 w-4" />
+                Export Excel
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
         <CardContent>
           {isLoading ? (
             <div className="text-center py-8">Memuat data...</div>
@@ -1075,7 +1087,6 @@ export default function RekapanPembayaran() {
                 </table>
               </div>
 
-              {/* BARU: kontrol pagination — dipusatkan di tengah bawah */}
               <div className="flex flex-col items-center gap-2 mt-4 pt-3 border-t">
                 <p className="text-xs text-muted-foreground">
                   Menampilkan {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredData.length)} dari {filteredData.length} transaksi
@@ -1107,7 +1118,7 @@ export default function RekapanPembayaran() {
         </CardContent>
       </Card>
 
-      {/* ─── Lightbox bukti pembayaran ────────────────────────────────────── */}
+      {/* Lightbox bukti pembayaran */}
       <Dialog open={!!buktiPreviewUrl} onOpenChange={(o) => !o && setBuktiPreviewUrl(null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
