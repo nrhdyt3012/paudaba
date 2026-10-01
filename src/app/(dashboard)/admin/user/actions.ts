@@ -316,20 +316,20 @@ export async function updateUser(prevState: AuthFormState, formData: FormData) {
 
   const data_ = validatedFields.data;
 
-  const updatePayload: Record<string, any> = {
-    namasiswa: data_.nama_siswa,
-    nis: data_.NIS || null,
-    jeniskelamin: data_.jenis_kelamin || null,
-    kelas: data_.kelas,
-    angkatan: data_.angkatan || null,
-    namawali: data_.nama_wali,
-    nowa: data_.no_wa,
-    tempatlahir: data_.tempat_lahir || null,
-    tanggallahir: data_.tanggal_lahir || null,
-    alamat: data_.alamat || null,
-    tipe_spp: data_.tipe_spp || "reguler",
-    updatedat: new Date().toISOString(),
-  };
+const updatePayload: Record<string, any> = {
+  namasiswa: data_.nama_siswa,
+  nis: data_.NIS || null,
+  jeniskelamin: data_.jenis_kelamin || null,
+  kelas: data_.kelas || null,          // ← diubah
+  angkatan: data_.angkatan || null,
+  namawali: data_.nama_wali || null,   // ← diubah
+  nowa: data_.no_wa || null,           // ← diubah
+  tempatlahir: data_.tempat_lahir || null,
+  tanggallahir: data_.tanggal_lahir || null,
+  alamat: data_.alamat || null,
+  tipe_spp: data_.tipe_spp || "reguler",
+  updatedat: new Date().toISOString(),
+};
 
   let waliLamaIdUntukDibersihkan: string | null = null;
   let deskripsiTambahan = "";

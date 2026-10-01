@@ -49,16 +49,20 @@ export const createUserSchema = z.object({
 
 export const updateUserSchema = z.object({
   wali_auth_id_baru: z.string().optional(), // ← diisi kalau bendahara pilih "pindah wali" di form Edit
+
+  // Satu-satunya yang wajib
   nama_siswa: z.string().min(1, "Nama siswa wajib diisi"),
   NIS: z.string().min(1, "NIS wajib diisi"),
-  jenis_kelamin: z.enum(["Laki-laki", "Perempuan"], { message: "Jenis kelamin wajib dipilih" }),
-  kelas: z.string().min(1, "Kelas wajib dipilih"),
-  angkatan: z.string().min(1, "Angkatan wajib diisi"),
-  nama_wali: z.string().min(1, "Nama wali wajib diisi"),
-  no_wa: z.string().min(1, "Nomor WhatsApp wali wajib diisi"),
+
+  // Semua opsional (string kosong "" juga diterima karena form selalu mengirim "")
+  jenis_kelamin: z.enum(["Laki-laki", "Perempuan"]).optional().or(z.literal("")),
+  kelas: z.string().optional(),
+  angkatan: z.string().optional(),
+  nama_wali: z.string().optional(),
+  no_wa: z.string().optional(),
   email_wali: z.string().email("Format email wali tidak valid").optional().or(z.literal("")),
-  tempat_lahir: z.string().min(1, "Tempat lahir wajib diisi"),
-  tanggal_lahir: z.string().min(1, "Tanggal lahir wajib diisi"),
+  tempat_lahir: z.string().optional(),
+  tanggal_lahir: z.string().optional(),
   alamat: z.string().optional(),
   tipe_spp: z.enum(["reguler", "subsidi"]).default("reguler"),
   role: z.string().default("siswa"),

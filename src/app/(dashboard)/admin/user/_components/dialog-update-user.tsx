@@ -68,7 +68,7 @@ export default function DialogUpdateUser({
       } else if (jkLower === "perempuan" || jkLower === "p") {
         normalizedJK = "Perempuan";
       }
-      if (normalizedJK) form.setValue("jenis_kelamin", normalizedJK);
+      form.setValue("jenis_kelamin", normalizedJK ?? ("" as any));
 
       form.setValue("kelas", currentData.kelas || "");
       form.setValue("angkatan", currentData.angkatan || "");
