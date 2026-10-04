@@ -20,7 +20,8 @@ function parseNamaTagihanToFormValues(
   namaTagihan: string,
   jenisTagihanDB: string // "Reguler" | "Subsidi"
 ): Partial<MenuForm> {
-  const nama = namaTagihan || "";
+ const nama = namaTagihan || "";
+  const tipeTagihan = jenisTagihanDB === "Subsidi" ? "Subsidi" : "Reguler";
 
   if (nama.startsWith("PPDB")) {
     // FIX: parse Gelombang + Tahun dari nama tagihan PPDB
@@ -30,6 +31,7 @@ function parseNamaTagihanToFormValues(
     const tahunMatch = nama.match(/(\d{4})/);
     return {
       jenisTagihan: "PPDB",
+      tipeTagihan,
       gelombangPPDB: gelombangMatch?.[1] || "",
       tahunPPDB: tahunMatch?.[1] || "",
     };
@@ -40,6 +42,7 @@ function parseNamaTagihanToFormValues(
     const tahunMatch = nama.match(/(\d{4})/);
     return {
       jenisTagihan: "Daftar Ulang",
+      tipeTagihan,
       semesterDaftarUlang: semesterMatch?.[1] || "",
       tahunDaftarUlang: tahunMatch?.[1] || "",
     };
@@ -79,9 +82,11 @@ function parseNamaTagihanToFormValues(
 
   // FIX: nama tidak match pola manapun -> perlakukan sebagai "Lainnya"
   // (nama tagihan yang sebelumnya diketik manual atau tidak beraturan)
-  return {
+return {
     jenisTagihan: "Lainnya",
-    namaTagihanManual: nama,
+    tipeTagihan,
+    // buang akhiran Reguler/Subsidi karena ditambahkan lagi otomatis saat simpan
+    namaTagihanManual: nama.replace(/\s+(reguler|subsidi)$/i, ""),
   };
 }
 
@@ -102,6 +107,7 @@ export default function DialogUpdateMenu({
   const onSubmit = form.handleSubmit((data) => {
     const { namaTagihan, dbJenisTagihan } = generateNamaTagihan({
       jenisTagihan: data.jenisTagihan,
+      tipeTagihan: data.tipeTagihan,
       gelombangPPDB: data.gelombangPPDB,
       tahunPPDB: data.tahunPPDB,
       tipeSPP: data.tipeSPP,
@@ -146,6 +152,7 @@ export default function DialogUpdateMenu({
 
       form.reset({
         jenisTagihan: parsed.jenisTagihan || "",
+        tipeTagihan: parsed.tipeTagihan || "Reguler",
         gelombangPPDB: parsed.gelombangPPDB || "",
         tahunPPDB: parsed.tahunPPDB || "",
         semesterDaftarUlang: parsed.semesterDaftarUlang || "",

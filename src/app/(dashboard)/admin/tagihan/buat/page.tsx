@@ -67,9 +67,11 @@ function parsePeriodeFromNama(namaTagihan: string): { bulan: number; tahun: numb
   return { bulan: now.getMonth() + 1, tahun };
 }
 
+// after
 function getAutoTipeSPP(namaTagihan: string): "reguler" | "subsidi" | null {
-  if (!namaTagihan?.startsWith("SPP")) return null;
-  return namaTagihan.includes("Subsidi") ? "subsidi" : "reguler";
+  if (!namaTagihan) return null;
+  if (namaTagihan.includes("Subsidi")) return "subsidi";
+  return namaTagihan.startsWith("SPP") ? "reguler" : null;
 }
 
 // FIX: deteksi kelas dari nama master tagihan — kalau namanya mengandung

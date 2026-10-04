@@ -4,6 +4,7 @@ import { z } from "zod";
 export const menuFormSchema = z
   .object({
     jenisTagihan: z.string().min(1, "Jenis tagihan wajib dipilih"),
+    tipeTagihan: z.string().optional(), // "Reguler" | "Subsidi"
 
     // PPDB
     gelombangPPDB: z.string().optional(),

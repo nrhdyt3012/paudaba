@@ -35,7 +35,12 @@ import {
 } from "lucide-react";
 import { convertIDR } from "@/lib/utils";
 import { importRiwayatPembayaran } from "@/app/(dashboard)/admin/rekapan-pembayaran/actions";
-import { parsePeriodeDariNama, getCakupanBulan, isTagihanSPP } from "@/lib/periode-tagihan";
+import {
+  parsePeriodeDariNama,
+  getCakupanBulan,
+  isTagihanSPP,
+  getTipeSiswaDariNama,
+} from "@/lib/periode-tagihan";
 
 const BULAN_NAMA = [
   "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
@@ -57,6 +62,12 @@ const KELAS_OPTIONS = [
 const METODE_OPTIONS = [
   { value: "cash", label: "Cash" },
   { value: "transfer", label: "Transfer" },
+];
+
+const TIPE_SISWA_OPTIONS = [
+  { value: "semua", label: "Semua Tipe" },
+  { value: "reguler", label: "Reguler" },
+  { value: "subsidi", label: "Subsidi" },
 ];
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -150,6 +161,7 @@ export default function ImporRiwayatPembayaranPage() {
 
   // Step 3
   const [filterKelas, setFilterKelas] = useState("semua");
+  const [filterTipe, setFilterTipe] = useState("semua");
   const [searchSiswa, setSearchSiswa] = useState("");
   const [selectedSiswa, setSelectedSiswa] = useState<string[]>([]);
 
@@ -198,17 +210,19 @@ export default function ImporRiwayatPembayaranPage() {
 
   // ─── Data: siswa aktif ─────────────────────────────────────────────────
   const { data: siswaList, isLoading: loadingSiswa } = useQuery({
-    queryKey: ["siswa-impor-riwayat", filterKelas, searchSiswa],
+// after
+    queryKey: ["siswa-impor-riwayat", filterKelas, filterTipe, searchSiswa],
     enabled: !!selectedMaster,
     queryFn: async () => {
       let q = supabase
         .from("siswa")
-        .select("id, namasiswa, kelas, nis")
+        .select("id, namasiswa, kelas, nis, tipe_spp")
         .eq("is_active", true)
         .eq("status", "aktif")
         .order("kelas")
         .order("namasiswa");
       if (filterKelas !== "semua") q = q.eq("kelas", filterKelas);
+      if (filterTipe !== "semua") q = q.eq("tipe_spp", filterTipe);
       if (searchSiswa) q = q.ilike("namasiswa", `%${searchSiswa}%`);
       const { data } = await q;
       return data || [];
@@ -355,11 +369,13 @@ setPeriodeTerdeteksi(periode.terdeteksi);
       (opt) => opt.value !== "semua" && opt.value.toUpperCase() === jenjangMaster
     );
     setFilterKelas(kelasCocok ? kelasCocok.value : "semua");
+    setFilterTipe(getTipeSiswaDariNama(master.namatagihan));
   };
 
   const handleClearMaster = () => {
     setSelectedMaster("");
     setFilterKelas("semua");
+    setFilterTipe("semua");
     setSelectedSiswa([]);
     setRows([]);
   };
@@ -684,6 +700,14 @@ if (isSiswaTerkunci(id)) return;
                     ))}
                   </SelectContent>
                 </Select>
+                <Select value={filterTipe} onValueChange={setFilterTipe}>
+                  <SelectTrigger className="w-[130px] h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {TIPE_SISWA_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <div className="relative w-56">
                   <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
                   <Input
@@ -696,8 +720,8 @@ if (isSiswaTerkunci(id)) return;
               </div>
             </div>
             <p className="text-[11px] text-muted-foreground mt-1">
-              Siswa yang sudah <span className="font-medium">Lunas</span> untuk periode & tagihan ini otomatis dipudarkan dan tidak bisa dipilih.
-            </p>
+  Siswa yang sudah <span className="font-medium">Lunas</span> untuk periode & tagihan ini otomatis dipudarkan dan tidak bisa dipilih.
+              Filter Kelas dan Tipe otomatis mengikuti nama master tagihan, dan bisa diganti manual.            </p>
           </CardHeader>
           <CardContent>
             {loadingSiswa ? (

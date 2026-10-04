@@ -19,6 +19,7 @@ import {
   GELOMBANG_LIST,
   JENJANG_LIST,
   JENIS_TAGIHAN_LIST,
+  TIPE_TAGIHAN_LIST,
   SEMESTER_LIST,
   TAHUN_LIST,
   TIPE_SPP_LIST,
@@ -55,6 +56,7 @@ export default function FormMenu({
   const allValues = useWatch({ control: form.control });
   const { namaTagihan: previewNama } = generateNamaTagihan({
     jenisTagihan: allValues.jenisTagihan || "",
+    tipeTagihan: allValues.tipeTagihan,
     gelombangPPDB: allValues.gelombangPPDB,
     tahunPPDB: allValues.tahunPPDB,
     tipeSPP: allValues.tipeSPP,
@@ -69,6 +71,7 @@ export default function FormMenu({
 
   // Reset field turunan saat jenis tagihan berubah
   const handleJenisTagihanChange = () => {
+    form.setValue("tipeTagihan", "Reguler");
     form.setValue("gelombangPPDB", "");
     form.setValue("tahunPPDB", "");
     form.setValue("semesterDaftarUlang", "");
@@ -225,6 +228,14 @@ export default function FormMenu({
                 />
               </div>
             )}
+  {(isPPDB || isDaftarUlang || isLainnya) && (
+              <FormSelect
+                form={form}
+                name="tipeTagihan"
+                label="Tipe Tagihan"
+                selectItem={TIPE_TAGIHAN_LIST}
+              />
+            )}
 
             {/* ─── Field 3: Jenjang ─── */}
             <FormSelect
@@ -253,8 +264,8 @@ export default function FormMenu({
             />
 
             {/* ─── Preview nama tagihan (disembunyikan untuk "Lainnya" karena sudah sama persis dengan input) ─── */}
-            {previewNama && !isLainnya && (
-              <div className="rounded-md bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 px-3 py-2">
+            {previewNama && (        
+                <div className="rounded-md bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 px-3 py-2">
                 <p className="text-xs text-muted-foreground mb-0.5">
                   Nama tagihan yang akan disimpan:
                 </p>

@@ -39,3 +39,12 @@ export function parsePeriodeDariNama(nama?: string | null) {
   if (nama.includes("Semester Genap")) return { bulan: 1, tahun, terdeteksi: true };
   return { ...fallback, tahun };
 }
+
+export function getTipeSiswaDariNama(
+  nama?: string | null
+): "reguler" | "subsidi" | "semua" {
+  const n = (nama || "").toLowerCase();
+  if (n.includes("subsidi")) return "subsidi"; // dicek dulu
+  if (n.includes("reguler")) return "reguler";
+  return "semua";
+}

@@ -10,6 +10,7 @@ export const HEADER_TABLE_MENU = [
 
 export const INITIAL_MENU = {
   jenisTagihan: "",
+  tipeTagihan: "Reguler", // "Reguler" | "Subsidi" (untuk PPDB, Daftar Ulang, Lainnya)
   // PPDB fields
   gelombangPPDB: "",
   tahunPPDB: "",
@@ -56,6 +57,11 @@ export const JENIS_TAGIHAN_LIST = [
   { value: "SPP Subsidi", label: "SPP Subsidi" },
   { value: "Lainnya", label: "Lainnya" },
 ];
+export const TIPE_TAGIHAN_LIST = [
+  { value: "Reguler", label: "Reguler" },
+  { value: "Subsidi", label: "Subsidi" },
+];
+
 
 // FIX: opsi gelombang PPDB
 export const GELOMBANG_LIST = [
@@ -102,6 +108,7 @@ export const TAHUN_LIST = (() => {
  */
 export function generateNamaTagihan(values: {
   jenisTagihan: string;
+  tipeTagihan?: string;
   gelombangPPDB?: string;
   tahunPPDB?: string;
   tipeSPP?: string;
@@ -115,15 +122,17 @@ export function generateNamaTagihan(values: {
 }): { namaTagihan: string; dbJenisTagihan: string } {
   const { jenisTagihan, jenjang } = values;
   const jenjangLabel = jenjang || "";
-
+  const isSubsidi = values.tipeTagihan === "Subsidi";
+  const dbTipe = values.tipeTagihan === "Subsidi" ? "Subsidi" : "Reguler";
+  const akhiran = ` ${dbTipe}`; // selalu ditulis, sama seperti SPP
   if (jenisTagihan === "PPDB") {
     // FIX: PPDB sekarang punya detail Gelombang + Tahun
     const gelombang = values.gelombangPPDB || "";
     const tahun = values.tahunPPDB || "";
     const gelombangLabel = gelombang ? `Gelombang ${gelombang}` : "";
     return {
-      namaTagihan: `PPDB ${jenjangLabel} ${gelombangLabel} ${tahun}`.trim(),
-      dbJenisTagihan: "Reguler",
+      namaTagihan: `PPDB ${jenjangLabel} ${gelombangLabel} ${tahun}`.trim() + akhiran,
+      dbJenisTagihan: dbTipe,
     };
   }
 
@@ -131,8 +140,8 @@ export function generateNamaTagihan(values: {
     const semester = values.semesterDaftarUlang || "";
     const tahun = values.tahunDaftarUlang || "";
     return {
-      namaTagihan: `Daftar Ulang ${jenjangLabel} Semester ${semester} ${tahun}`.trim(),
-      dbJenisTagihan: "Reguler",
+      namaTagihan: `Daftar Ulang ${jenjangLabel} Semester ${semester} ${tahun}`.trim() + akhiran,
+      dbJenisTagihan: dbTipe,
     };
   }
 
@@ -167,9 +176,12 @@ export function generateNamaTagihan(values: {
 
   // FIX: "Lainnya" -> nama tagihan diketik manual oleh user, tidak di-generate
   if (jenisTagihan === "Lainnya") {
+const namaManual = (values.namaTagihanManual || "")
+      .trim()
+      .replace(/\s+(reguler|subsidi)$/i, "");
     return {
-      namaTagihan: (values.namaTagihanManual || "").trim(),
-      dbJenisTagihan: "Reguler",
+      namaTagihan: namaManual ? namaManual + akhiran : "",
+      dbJenisTagihan: dbTipe,
     };
   }
 
