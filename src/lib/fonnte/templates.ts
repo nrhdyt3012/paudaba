@@ -39,9 +39,6 @@ Kami informasikan bahwa telah diterbitkan tagihan pembayaran untuk Ananda *${par
 - Jenis Tagihan: ${params.namaTagihan}
 - Nominal: Rp${nominalFormatted}
 
-Untuk melakukan pembayaran, silakan mengakses tautan berikut:
-${params.linkPembayaran}
-
 Atas perhatian dan kerja sama Bapak/Ibu, kami ucapkan terima kasih.
 
 Wassalamu'alaikum Wr. Wb.

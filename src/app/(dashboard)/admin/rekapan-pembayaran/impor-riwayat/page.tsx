@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { convertIDR } from "@/lib/utils";
 import { importRiwayatPembayaran } from "@/app/(dashboard)/admin/rekapan-pembayaran/actions";
+import { parsePeriodeDariNama, getCakupanBulan, isTagihanSPP } from "@/lib/periode-tagihan";
 
 const BULAN_NAMA = [
   "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
@@ -143,6 +144,7 @@ export default function ImporRiwayatPembayaranPage() {
   // Step 2
   const [selectedBulan, setSelectedBulan] = useState(new Date().getMonth() + 1);
   const [selectedTahun, setSelectedTahun] = useState(new Date().getFullYear());
+  const [periodeTerdeteksi, setPeriodeTerdeteksi] = useState(true);
   const [globalTanggal, setGlobalTanggal] = useState(todayIso());
   const [globalMetode, setGlobalMetode] = useState<MetodePembayaran>("cash");
 
@@ -220,13 +222,17 @@ export default function ImporRiwayatPembayaranPage() {
     staleTime: 0,
     gcTime: 0,
     refetchOnMount: "always",
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("tagihan_siswa")
-        .select("idsiswa, jumlahterbayar, jumlahtagihan, statuspembayaran")
-        .eq("idmastertagihan", parseInt(selectedMaster))
-        .eq("bulan", selectedBulan)
-        .eq("tahun", selectedTahun);
+queryFn: async () => {
+  const { data, error } = await supabase
+    .from("tagihan_siswa")
+    .select("idsiswa, jumlahterbayar, jumlahtagihan, statuspembayaran")
+    .eq("idmastertagihan", parseInt(selectedMaster))
+    .eq("bulan", selectedBulan)
+    .eq("tahun", selectedTahun);
+  if (error) {
+    console.error("Gagal ambil tagihan existing:", error);
+    throw error;
+  }
       const map: Record<string, any> = {};
       (data || []).forEach((t: any) => {
         map[t.idsiswa] = t;
@@ -234,6 +240,35 @@ export default function ImporRiwayatPembayaranPage() {
       return map;
     },
   });
+
+  const { data: tercakupIds } = useQuery({
+  queryKey: ["tagihan-tercakup-impor-riwayat", selectedMaster, selectedBulan, selectedTahun],
+  enabled: !!selectedMaster && isTagihanSPP(masterSelected?.namatagihan),
+  staleTime: 0,
+  gcTime: 0,
+  refetchOnMount: "always",
+  queryFn: async () => {
+    const cakupanBaru = getCakupanBulan(masterSelected?.namatagihan, selectedBulan);
+    const { data, error } = await supabase
+      .from("tagihan_siswa")
+      .select("idsiswa, bulan, namatagihan, idmastertagihan")
+      .ilike("namatagihan", "SPP%")
+      .eq("tahun", selectedTahun)
+      .or(`bulan.in.(${cakupanBaru.join(",")}),namatagihan.ilike.*Semester*`);
+    if (error) {
+      console.error("Gagal cek cakupan SPP:", error);
+      throw error;
+    }
+    return (data || [])
+      .filter((t: any) => {
+        const tagihanSama =
+          t.idmastertagihan === parseInt(selectedMaster) && t.bulan === selectedBulan;
+        if (tagihanSama) return false; // yang sama ditangani existingTagihanMap
+        return getCakupanBulan(t.namatagihan, t.bulan).some((b) => cakupanBaru.includes(b));
+      })
+      .map((t: any) => t.idsiswa as string);
+  },
+});
 
   const siswaByKelas = useMemo(() => {
     const groups: Record<string, any[]> = {};
@@ -245,8 +280,18 @@ export default function ImporRiwayatPembayaranPage() {
     return groups;
   }, [siswaList]);
 
-  const isSiswaLunas = (idsiswa: string) =>
-    existingTagihanMap?.[idsiswa]?.statuspembayaran === "LUNAS";
+  // after
+const isSiswaLunas = (idsiswa: string) => {
+  const t = existingTagihanMap?.[idsiswa];
+  if (!t) return false;
+  const status = (t.statuspembayaran || "").trim().toUpperCase();
+  const total = parseFloat(t.jumlahtagihan || "0");
+  const terbayar = parseFloat(t.jumlahterbayar || "0");
+  return status === "LUNAS" || (total > 0 && terbayar >= total);
+};
+
+const isSiswaTercakup = (idsiswa: string) => (tercakupIds ?? []).includes(idsiswa);
+const isSiswaTerkunci = (idsiswa: string) => isSiswaLunas(idsiswa) || isSiswaTercakup(idsiswa);
 
   // BARU: total & sisa tagihan per siswa
   const getTotalTagihan = (idsiswa: string) => {
@@ -287,11 +332,12 @@ export default function ImporRiwayatPembayaranPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSiswa, masterSelected, existingTagihanMap, fetchingExisting, siswaList]);
 
-  useEffect(() => {
-    if (!existingTagihanMap) return;
-    setSelectedSiswa((prev) => prev.filter((id) => !isSiswaLunas(id)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [existingTagihanMap]);
+// after
+useEffect(() => {
+  if (!existingTagihanMap) return;
+  setSelectedSiswa((prev) => prev.filter((id) => !isSiswaTerkunci(id)));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [existingTagihanMap, tercakupIds]);
 
   const handlePilihMaster = (master: any) => {
     setSelectedMaster(master.id_mastertagihan?.toString());
@@ -300,6 +346,10 @@ export default function ImporRiwayatPembayaranPage() {
     setSelectedSiswa([]);
     setRows([]);
 
+    const periode = parsePeriodeDariNama(master.namatagihan);
+setSelectedBulan(periode.bulan);
+setSelectedTahun(periode.tahun);
+setPeriodeTerdeteksi(periode.terdeteksi);
     const jenjangMaster = (master.jenjang || "").trim().toUpperCase();
     const kelasCocok = KELAS_OPTIONS.find(
       (opt) => opt.value !== "semua" && opt.value.toUpperCase() === jenjangMaster
@@ -315,7 +365,7 @@ export default function ImporRiwayatPembayaranPage() {
   };
 
   const handleToggleSiswa = (id: string) => {
-    if (isSiswaLunas(id)) return;
+if (isSiswaTerkunci(id)) return;
     setSelectedSiswa((prev) =>
       prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]
     );
@@ -324,7 +374,7 @@ export default function ImporRiwayatPembayaranPage() {
   const handleSelectKelas = (kelas: string) => {
     const idsSelectable = (siswaByKelas[kelas] || [])
       .map((s: any) => s.id)
-      .filter((id: string) => !isSiswaLunas(id));
+.filter((id: string) => !isSiswaTerkunci(id));
     if (idsSelectable.length === 0) return;
     const allSelected = idsSelectable.every((id) => selectedSiswa.includes(id));
     setSelectedSiswa((prev) =>
@@ -543,8 +593,15 @@ export default function ImporRiwayatPembayaranPage() {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 w-full">
               <div className="space-y-1.5">
                 <Label className="text-xs">Bulan</Label>
-                <Select value={selectedBulan.toString()} onValueChange={(v) => setSelectedBulan(parseInt(v))}>
-                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+<Select
+  value={selectedBulan.toString()}
+  onValueChange={(v) => {
+    setSelectedBulan(parseInt(v));
+    setPeriodeTerdeteksi(true);
+    setSelectedSiswa([]);
+    setRows([]);
+  }}
+>                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {BULAN_NAMA.slice(1).map((nama, i) => (
                       <SelectItem key={i + 1} value={(i + 1).toString()}>{nama}</SelectItem>
@@ -554,8 +611,15 @@ export default function ImporRiwayatPembayaranPage() {
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">Tahun</Label>
-                <Select value={selectedTahun.toString()} onValueChange={(v) => setSelectedTahun(parseInt(v))}>
-                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+<Select
+  value={selectedTahun.toString()}
+  onValueChange={(v) => {
+    setSelectedTahun(parseInt(v));
+    setPeriodeTerdeteksi(true);
+    setSelectedSiswa([]);
+    setRows([]);
+  }}
+>                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {TAHUN_OPTIONS.map((t) => (
                       <SelectItem key={t.value} value={t.value.toString()}>{t.label}</SelectItem>
@@ -648,8 +712,7 @@ export default function ImporRiwayatPembayaranPage() {
               <div className="space-y-4 max-h-[28rem] overflow-y-auto pr-1">
                 {Object.entries(siswaByKelas).map(([kelas, siswaKelas]) => {
                   const idsAll = (siswaKelas as any[]).map((s) => s.id);
-                  const idsSelectable = idsAll.filter((id) => !isSiswaLunas(id));
-                  const allChecked =
+const idsSelectable = idsAll.filter((id) => !isSiswaTerkunci(id));                  const allChecked =
                     idsSelectable.length > 0 && idsSelectable.every((id) => selectedSiswa.includes(id));
                   return (
                     <div key={kelas}>
@@ -666,15 +729,18 @@ export default function ImporRiwayatPembayaranPage() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-1.5 pl-1">
                         {(siswaKelas as any[]).map((s: any) => {
                           const isChecked = selectedSiswa.includes(s.id);
-                          const existing = existingTagihanMap?.[s.id];
-                          const isLunas = existing?.statuspembayaran === "LUNAS";
-                          return (
-                            <div
-                              key={s.id}
-                              onClick={() => handleToggleSiswa(s.id)}
-                              className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border transition-all ${
-                                isLunas
-                                  ? "opacity-40 cursor-not-allowed border-transparent grayscale"
+ // after
+const existing = existingTagihanMap?.[s.id];
+const isLunas = isSiswaLunas(s.id);
+const isTercakup = !isLunas && isSiswaTercakup(s.id);
+const isTerkunci = isLunas || isTercakup;
+return (
+  <div
+    key={s.id}
+    onClick={() => handleToggleSiswa(s.id)}
+    className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border transition-all ${
+      isTerkunci
+        ? "opacity-40 cursor-not-allowed border-transparent grayscale"
                                   : isChecked
                                   ? "border-green-400 bg-green-50 dark:bg-green-950/40 dark:border-green-700 cursor-pointer"
                                   : "border-transparent hover:border-muted-foreground/20 hover:bg-muted/50 cursor-pointer"
@@ -682,7 +748,7 @@ export default function ImporRiwayatPembayaranPage() {
                             >
                               <Checkbox
                                 checked={isChecked}
-                                disabled={isLunas}
+                                disabled={isTerkunci}
                                 onCheckedChange={() => handleToggleSiswa(s.id)}
                               />
                               <p className="text-sm truncate flex-1">{s.namasiswa}</p>
@@ -691,7 +757,12 @@ export default function ImporRiwayatPembayaranPage() {
                                   Sudah Lunas
                                 </Badge>
                               )}
-                              {existing && !isLunas && (
+                              {isTercakup && (
+  <Badge variant="outline" className="text-[10px] border-sky-300 text-sky-700 shrink-0">
+    Tercakup SPP Lain
+  </Badge>
+)}
+{existing && !isLunas && !isTercakup && (
                                 <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700 shrink-0">
                                   Ada Tunggakan
                                 </Badge>

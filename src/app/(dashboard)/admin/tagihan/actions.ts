@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { writeChangelog } from "@/lib/changelog";
 import { hapusRekapanTunggakan } from "@/lib/rekapan-helper";
 import { revalidatePath } from "next/cache";
+import { getCakupanBulan, isTagihanSPP } from "@/lib/periode-tagihan";
 
 const first = (v: any) => (Array.isArray(v) ? v[0] : v);
 
@@ -470,13 +471,32 @@ export async function createTagihanBatch(
     };
   }
 
-  const { data: existing } = await supabase
+const bulanNum = parseInt(bulan as string);
+const tahunNum = parseInt(tahun as string);
+
+let existing: any[] | null;
+if (isTagihanSPP(masterTagihan.namatagihan)) {
+  const cakupanBaru = getCakupanBulan(masterTagihan.namatagihan, bulanNum);
+  const { data } = await supabase
+    .from("tagihan_siswa")
+    .select("idsiswa, bulan, namatagihan, siswa!idsiswa(namasiswa)")
+    .in("idsiswa", siswaIds)
+    .ilike("namatagihan", "SPP%")
+    .eq("tahun", tahunNum)
+    .or(`bulan.in.(${cakupanBaru.join(",")}),namatagihan.ilike.*Semester*`);
+  existing = (data || []).filter((t: any) =>
+    getCakupanBulan(t.namatagihan, t.bulan).some((b) => cakupanBaru.includes(b))
+  );
+} else {
+  const { data } = await supabase
     .from("tagihan_siswa")
     .select("idsiswa, siswa!idsiswa(namasiswa)")
     .eq("idmastertagihan", masterTagihanId)
-    .eq("bulan", parseInt(bulan as string))
-    .eq("tahun", parseInt(tahun as string))
+    .eq("bulan", bulanNum)
+    .eq("tahun", tahunNum)
     .in("idsiswa", siswaIds);
+  existing = data;
+}
 
   if (existing && existing.length > 0) {
     const names = existing
@@ -485,8 +505,7 @@ export async function createTagihanBatch(
     return {
       status: "error",
       errors: {
-        _form: [`Siswa berikut sudah memiliki tagihan periode ini: ${names}`],
-      },
+_form: [`Siswa berikut sudah memiliki tagihan pada periode ini (termasuk yang tercakup SPP semester/bulanan): ${names}`],      },
     };
   }
 

@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { convertIDR } from "@/lib/utils";
 import { createTagihanBatch } from "../actions";
+import { getCakupanBulan, isTagihanSPP } from "@/lib/periode-tagihan";
 import { useRouter } from "next/navigation";
 
 const BULAN_NAMA = [
@@ -176,12 +177,35 @@ export default function BuatTagihanPage() {
       if (filterTipeSPP !== "semua") q = q.eq("tipe_spp", filterTipeSPP);
       if (searchSiswa) q = q.ilike("namasiswa", `%${searchSiswa}%`);
       const { data: semuaSiswa } = await q;
-      const { data: sudahTagihan } = await supabase
-        .from("tagihan_siswa").select("idsiswa")
-        .eq("idmastertagihan", parseInt(selectedMaster))
-        .eq("bulan", selectedBulan).eq("tahun", selectedTahun);
-      const sudahSet = new Set((sudahTagihan || []).map((t: any) => t.idsiswa));
-      return (semuaSiswa || []).filter((s: any) => !sudahSet.has(s.id));
+      // after
+const namaMaster = masterList?.find(
+  (m: any) => m.id_mastertagihan?.toString() === selectedMaster
+)?.namatagihan;
+
+let sudahSet: Set<string>;
+if (isTagihanSPP(namaMaster)) {
+  const cakupanBaru = getCakupanBulan(namaMaster, selectedBulan);
+  const { data: sppAda } = await supabase
+    .from("tagihan_siswa")
+    .select("idsiswa, bulan, namatagihan")
+    .ilike("namatagihan", "SPP%")
+    .eq("tahun", selectedTahun)
+    .or(`bulan.in.(${cakupanBaru.join(",")}),namatagihan.ilike.*Semester*`);
+  sudahSet = new Set(
+    (sppAda || [])
+      .filter((t: any) =>
+        getCakupanBulan(t.namatagihan, t.bulan).some((b) => cakupanBaru.includes(b))
+      )
+      .map((t: any) => t.idsiswa)
+  );
+} else {
+  const { data: sudahTagihan } = await supabase
+    .from("tagihan_siswa").select("idsiswa")
+    .eq("idmastertagihan", parseInt(selectedMaster))
+    .eq("bulan", selectedBulan).eq("tahun", selectedTahun);
+  sudahSet = new Set((sudahTagihan || []).map((t: any) => t.idsiswa));
+}
+return (semuaSiswa || []).filter((s: any) => !sudahSet.has(s.id));
     },
   });
 

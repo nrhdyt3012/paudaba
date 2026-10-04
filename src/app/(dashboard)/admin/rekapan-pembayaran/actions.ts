@@ -5,6 +5,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { getCakupanBulan, isTagihanSPP } from "@/lib/periode-tagihan";
 
 const BULAN_NAMA = [
   "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
@@ -75,9 +76,34 @@ export async function importRiwayatPembayaran(
     .in("id", idsiswaUnik);
   const siswaMap = new Map((siswaRows || []).map((s: any) => [s.id, s]));
 
-  const periodeStr = `${BULAN_NAMA[input.bulan]} ${input.tahun}`;
+// after
+const periodeStr = `${BULAN_NAMA[input.bulan]} ${input.tahun}`;
 
-  let berhasil = 0;
+// Siswa yang sudah punya tagihan SPP lain yang cakupan bulannya beririsan
+// (mis. SPP bulanan vs semester) tidak boleh dibuatkan tagihan baru.
+const bentrokMap = new Map<string, string>();
+if (isTagihanSPP(master.namatagihan)) {
+  const cakupanBaru = getCakupanBulan(master.namatagihan, input.bulan);
+  const { data: sppAda } = await supabase
+    .from("tagihan_siswa")
+    .select("idsiswa, bulan, namatagihan, idmastertagihan")
+    .in("idsiswa", idsiswaUnik)
+    .ilike("namatagihan", "SPP%")
+    .eq("tahun", input.tahun)
+    .or(`bulan.in.(${cakupanBaru.join(",")}),namatagihan.ilike.*Semester*`);
+  (sppAda || []).forEach((t: any) => {
+    const tagihanSama =
+      t.idmastertagihan === input.idmastertagihan && t.bulan === input.bulan;
+    if (
+      !tagihanSama &&
+      getCakupanBulan(t.namatagihan, t.bulan).some((b) => cakupanBaru.includes(b))
+    ) {
+      bentrokMap.set(t.idsiswa, t.namatagihan);
+    }
+  });
+}
+
+let berhasil = 0;
   let gagal = 0;
   const pesanGagal: string[] = [];
 
@@ -88,7 +114,13 @@ export async function importRiwayatPembayaran(
         pesanGagal.push(`Nominal tidak valid untuk siswa ${row.idsiswa}`);
         continue;
       }
-
+if (bentrokMap.has(row.idsiswa)) {
+        gagal++;
+        pesanGagal.push(
+          `Siswa ${row.idsiswa} sudah tercakup tagihan "${bentrokMap.get(row.idsiswa)}" pada periode ini`
+        );
+        continue;
+      }
       // BARU: validasi metode pembayaran — cuma boleh "cash" atau
       // "transfer". Kalau kosong/tidak dikenal, fallback ke "cash" supaya
       // baris tidak gagal total hanya gara-gara metode tidak terkirim.
@@ -141,6 +173,16 @@ export async function importRiwayatPembayaran(
           continue;
         }
         tagihan = tagihanBaru;
+      }
+
+      // after
+      const sisaSebelum =
+        parseFloat(tagihan.jumlahtagihan || "0") -
+        parseFloat(tagihan.jumlahterbayar || "0");
+      if (row.jumlahdibayar > sisaSebelum) {
+        gagal++;
+        pesanGagal.push(`Nominal siswa ${row.idsiswa} melebihi sisa tagihan`);
+        continue;
       }
 
       const jumlahTerbayarBaru =
